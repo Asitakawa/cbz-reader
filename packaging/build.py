@@ -100,11 +100,13 @@ def verify_frozen(app_dir: Path) -> bool:
     """在冻结产物上跑 --selftest，确认 PIL/webp/路径等依赖完整。"""
     step("3/6 冻结产物自检")
     exe = app_dir / f"{APP_NAME}.exe"
-    # 自检需要书架数据才能验证解码链路，这里带上当前书架索引
+    # 自检需要书库数据才能验证解码链路，这里带上当前书库索引
     data_src = ROOT / "data"
-    if (data_src / "shelf.json").exists():
-        (app_dir / "data").mkdir(exist_ok=True)
-        shutil.copy2(data_src / "shelf.json", app_dir / "data" / "shelf.json")
+    (app_dir / "data").mkdir(exist_ok=True)
+    for name in ("books.json", "history.json", "config.json"):
+        p = data_src / name
+        if p.exists():
+            shutil.copy2(p, app_dir / "data" / name)
     try:
         subprocess.run([str(exe), "--selftest"], timeout=120,
                        cwd=str(app_dir), check=False)
