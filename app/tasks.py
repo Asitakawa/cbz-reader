@@ -1,4 +1,4 @@
-"""异步任务：封面生成、页面解码、目录扫描导入。"""
+"""异步任务：封面生成、页面解码、导入（扫描 → 复制/引用 → 登记为一话）。"""
 from __future__ import annotations
 
 import os
@@ -9,13 +9,14 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
 
-from .cbr import Cbz, book_key, is_cbz
+from .cbr import ComicSource, book_key, has_any_comic, scan_chapters
 
 
 class _Signals(QObject):
-    cover = Signal(str, str)        # key, cover_path
-    page = Signal(str, int, object)  # key, index, QImage
-    import_done = Signal(list, list)  # new_files, skipped
+    cover = Signal(str, str)          # key, cover_path
+    bookcover = Signal(str)           # 尺寸无关的自定义书封面就绪（无参）
+    page = Signal(str, int, object)   # key, index, QImage
+    import_done = Signal(list, list)  # records, skipped
     import_progress = Signal(int, int, str)
     scan_done = Signal(list)
 
@@ -28,7 +29,7 @@ class _CoverJob(QRunnable):
 
     def run(self):
         try:
-            cb = Cbz(self.path)
+            cb = ComicSource(self.path)
             p = cb.cover_path(self.width)
             cb.close()
             if p:
@@ -48,7 +49,7 @@ class _PageJob(QRunnable):
     def run(self):
         try:
             from .imgutil import pil_to_qimage
-            cb = Cbz(self.path)
+            cb = ComicSource(self.path)
             im = cb.image(self.index, self.max_w or None, self.max_h or None)
             cb.close()
             self.sig.page.emit(self.key, self.index, pil_to_qimage(im))
@@ -57,7 +58,7 @@ class _PageJob(QRunnable):
 
 
 class _ImportJob(QRunnable):
-    """扫描源 → 复制入库（或仅登记引用）。"""
+    """扫描来源 → 逐个一话地复制入库（或仅登记引用）。"""
 
     def __init__(self, sig: _Signals, sources: list[str], dest: Path, conflict: str,
                  copy: bool = True):
@@ -66,61 +67,61 @@ class _ImportJob(QRunnable):
         self.dest, self.conflict, self.copy = dest, conflict, copy
         self.setAutoDelete(True)
 
-    @staticmethod
-    def _scan(sources: list[str]) -> list[Path]:
-        found: list[Path] = []
-        for s in sources:
-            p = Path(s)
-            if p.is_dir():
-                for root, _dirs, files in os.walk(p):
-                    for f in files:
-                        fp = Path(root) / f
-                        if is_cbz(fp):
-                            found.append(fp)
-            elif is_cbz(p):
-                found.append(p)
-        # 去重 + 稳定排序
-        uniq, seen = [], set()
-        for f in sorted(found, key=lambda x: str(x).lower()):
-            r = str(f.resolve()).lower()
-            if r not in seen:
-                seen.add(r)
-                uniq.append(f)
-        return uniq
+    def _unique(self, target: Path) -> Path:
+        stem, n = target.stem, 1
+        while target.exists():
+            target = target.with_name(f"{stem} ({n}){target.suffix}")
+            n += 1
+        return target
 
     def run(self):
-        files = self._scan(self.sources)
-        self.sig.scan_done.emit([str(f) for f in files])
-        added, skipped = [], []
-        total = len(files)
-        if not self.copy:
-            # 仅登记引用：直接把原文件路径写进书架
-            for i, src in enumerate(files):
-                self.sig.import_progress.emit(i + 1, total, src.name)
-                added.append(str(src))
-            self.sig.import_done.emit(added, skipped)
-            return
-        for i, src in enumerate(files):
-            self.sig.import_progress.emit(i + 1, total, src.name)
-            target = self.dest / src.name
-            try:
+        try:
+            items: list[dict] = []
+            for s in self.sources:
+                items += scan_chapters(s)
+            # 去重（同一路径只收一次）
+            uniq, seen = [], set()
+            for it in items:
+                k = str(Path(it["path"]).resolve()).lower()
+                if k not in seen:
+                    seen.add(k)
+                    uniq.append(it)
+            items = uniq
+            self.sig.scan_done.emit([i["path"] for i in items])
+
+            records, skipped = [], []
+            total = len(items)
+            for i, it in enumerate(items):
+                self.sig.import_progress.emit(i + 1, total, it["name"])
+                src = Path(it["path"])
+                try:
+                    stat = src.stat()
+                except Exception:
+                    skipped.append(str(src))
+                    continue
+
+                if not self.copy:
+                    records.append({"path": str(src), "kind": it["kind"], "name": it["name"],
+                                    "size": stat.st_size, "mtime": stat.st_mtime})
+                    continue
+
+                target = self.dest / src.name
                 if target.exists():
                     if self.conflict == "skip":
                         skipped.append(str(src))
                         continue
                     if self.conflict == "rename":
-                        stem, n = target.stem, 1
-                        while target.exists():
-                            target = self.dest / f"{stem} ({n}){target.suffix}"
-                            n += 1
-                    # overwrite：直接覆盖
-                if src.resolve() != target.resolve():
+                        target = self._unique(target)
+                if it["kind"] == "dir":
+                    shutil.copytree(src, target, dirs_exist_ok=True)
+                else:
                     shutil.copy2(src, target)
-                added.append(str(target))
-            except Exception:
-                traceback.print_exc(file=sys.stderr)
-                skipped.append(str(src))
-        self.sig.import_done.emit(added, skipped)
+                records.append({"path": str(target), "kind": it["kind"], "name": it["name"],
+                                "size": stat.st_size, "mtime": stat.st_mtime})
+            self.sig.import_done.emit(records, skipped)
+        except Exception:
+            traceback.print_exc(file=sys.stderr)
+            self.sig.import_done.emit([], [])
 
 
 class Async:
@@ -130,7 +131,6 @@ class Async:
         self.pool = QThreadPool()
         self.pool.setMaxThreadCount(max(2, min(6, (os.cpu_count() or 4))))
         self.sig = _Signals()
-        self.sig.setParent(None)
 
     def cover(self, path: str, width: int = 420):
         self.pool.start(_CoverJob(self.sig, path, width))
@@ -143,6 +143,10 @@ class Async:
 
     def wait(self, ms: int = 3000):
         self.pool.waitForDone(ms)
+
+    @staticmethod
+    def acceptable(paths: list[str]) -> list[str]:
+        return [p for p in paths if has_any_comic(p)]
 
 
 ASYNC = Async()

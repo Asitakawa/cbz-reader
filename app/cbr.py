@@ -1,4 +1,7 @@
-"""CBZ / ZIP 漫画解析引擎：自然排序、页面尺寸探测、并行解码、封面生成。"""
+"""漫画源解析：一话可以是 .cbz/.zip 压缩包，也可以是装满图片的文件夹。
+
+同时提供导入用的扫描工具：从一个文件/文件夹推导出「哪些是一话」。
+"""
 from __future__ import annotations
 
 import hashlib
@@ -11,9 +14,10 @@ from pathlib import Path
 
 from PIL import Image
 
-from .store import SIZE_DIR, COVER_DIR
+from .store import COVER_DIR, SIZE_DIR
 
 IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".jfif", ".avif"}
+ZIP_EXT = {".cbz", ".zip"}
 
 try:
     RES_LANCZOS = Image.Resampling.LANCZOS
@@ -27,12 +31,29 @@ def natkey(s: str):
 
 
 def book_key(path) -> str:
-    return hashlib.md5(str(Path(path).resolve()).lower().encode("utf-8")).hexdigest()[:16]
+    return hashlib.md5(str(Path(path)).lower().replace("\\", "/").encode("utf-8")).hexdigest()[:16]
 
 
-def is_cbz(path) -> bool:
+def is_zip_comic(path) -> bool:
     p = Path(path)
-    return p.suffix.lower() in (".cbz", ".zip") and p.is_file()
+    return p.suffix.lower() in ZIP_EXT and p.is_file()
+
+
+# 兼容旧命名
+is_cbz = is_zip_comic
+
+
+def has_images(d: Path) -> bool:
+    """文件夹里（含一级子目录）是否存在图片。"""
+    if not d.is_dir():
+        return False
+    try:
+        for f in d.iterdir():
+            if f.is_file() and f.suffix.lower() in IMG_EXT:
+                return True
+    except Exception:
+        return False
+    return False
 
 
 def image_from_bytes(data: bytes, max_w: int | None = None, max_h: int | None = None) -> Image.Image:
@@ -44,14 +65,15 @@ def image_from_bytes(data: bytes, max_w: int | None = None, max_h: int | None = 
     return im
 
 
-class Cbz:
-    """单个 CBZ 文件的读取句柄（线程安全）。"""
+class ComicSource:
+    """一话的读取句柄：压缩包 或 图片文件夹（线程安全）。"""
 
     def __init__(self, path):
         self.path = Path(path)
+        self.is_dir = self.path.is_dir()
         self.key = book_key(self.path)
         self._zf: zipfile.ZipFile | None = None
-        self._lock = threading.RLock()   # 可重入：read() 内部会再次取锁
+        self._lock = threading.RLock()
         self._names: list[str] | None = None
         self._sizes: list[tuple[int, int]] | None = None
 
@@ -78,23 +100,28 @@ class Cbz:
     # ---------- 页列表 ----------
     @property
     def names(self) -> list[str]:
-        if self._names is None:
-            try:
-                z = self.zip
-                names = []
-                for n in z.namelist():
+        if self._names is not None:
+            return self._names
+        names: list[str] = []
+        try:
+            if self.is_dir:
+                for f in self.path.iterdir():
+                    if f.is_file() and not f.name.startswith(".") \
+                            and f.suffix.lower() in IMG_EXT:
+                        names.append(f.name)
+            else:
+                for n in self.zip.namelist():
                     if n.endswith("/") or "__MACOSX" in n:
                         continue
-                    base = Path(n).name
-                    if base.startswith("."):
+                    if Path(n).name.startswith("."):
                         continue
                     if Path(n).suffix.lower() in IMG_EXT:
                         names.append(n)
-                names.sort(key=natkey)
-                self._names = names
-            except Exception:
-                self._names = []
-        return self._names
+        except Exception:
+            names = []
+        names.sort(key=natkey)
+        self._names = names
+        return names
 
     @property
     def page_count(self) -> int:
@@ -103,28 +130,42 @@ class Cbz:
     def read(self, index: int) -> bytes:
         n = self.names
         if not n:
-            raise IndexError("empty cbz")
+            raise IndexError("empty comic")
         index = max(0, min(index, len(n) - 1))
+        name = n[index]
+        if self.is_dir:
+            return (self.path / name).read_bytes()
         with self._lock:
-            return self.zip.read(n[index])
+            return self.zip.read(name)
 
     def image(self, index: int, max_w=None, max_h=None) -> Image.Image:
         return image_from_bytes(self.read(index), max_w, max_h)
 
     # ---------- 页面尺寸（带磁盘缓存）----------
+    def _fingerprint(self) -> float:
+        try:
+            if self.is_dir:
+                ts = [self.path.stat().st_mtime]
+                for f in self.path.iterdir():
+                    if f.is_file() and f.suffix.lower() in IMG_EXT:
+                        ts.append(f.stat().st_mtime)
+                return max(ts) if ts else 0.0
+            return self.path.stat().st_mtime
+        except Exception:
+            return 0.0
+
     @property
     def page_sizes(self) -> list[tuple[int, int]]:
         if self._sizes is not None:
             return self._sizes
         cache = SIZE_DIR / f"{self.key}.json"
+        fp = self._fingerprint()
         try:
             if cache.exists():
-                st = cache.stat()
-                if st.st_mtime >= self.path.stat().st_mtime:
-                    obj = json.loads(cache.read_text(encoding="utf-8"))
-                    if obj.get("count") == self.page_count and obj.get("sizes"):
-                        self._sizes = [tuple(s) for s in obj["sizes"]]
-                        return self._sizes
+                obj = json.loads(cache.read_text(encoding="utf-8"))
+                if obj.get("count") == self.page_count and obj.get("fp") == fp and obj.get("sizes"):
+                    self._sizes = [tuple(s) for s in obj["sizes"]]
+                    return self._sizes
         except Exception:
             pass
         sizes = []
@@ -136,7 +177,8 @@ class Cbz:
                 sizes.append((1000, 1500))
         self._sizes = sizes
         try:
-            cache.write_text(json.dumps({"count": len(sizes), "sizes": sizes}), encoding="utf-8")
+            cache.write_text(json.dumps({"count": len(sizes), "fp": fp, "sizes": sizes}),
+                             encoding="utf-8")
         except Exception:
             pass
         return sizes
@@ -144,12 +186,14 @@ class Cbz:
     # ---------- 封面 ----------
     def cover_path(self, width: int = 420) -> Path | None:
         out = COVER_DIR / f"{self.key}_{width}.jpg"
-        if out.exists() and out.stat().st_mtime >= self.path.stat().st_mtime:
-            return out
+        try:
+            if out.exists() and out.stat().st_mtime >= self._fingerprint():
+                return out
+        except Exception:
+            pass
         if self.page_count == 0:
             return None
         try:
-            # 取第一页（多数单行本首图即封面）
             im = self.image(0)
             if im.width > width:
                 im = im.resize((width, max(1, round(im.height * width / im.width))), RES_LANCZOS)
@@ -159,23 +203,27 @@ class Cbz:
             return None
 
 
-class BookHandlePool:
-    """复用已打开的 Cbz 句柄，避免频繁 reopen。"""
+# 兼容旧命名
+Cbz = ComicSource
+
+
+class SourcePool:
+    """复用已打开的句柄，避免频繁 reopen。"""
 
     def __init__(self, limit: int = 4):
         self._limit = limit
-        self._items: dict[str, Cbz] = {}
+        self._items: dict[str, ComicSource] = {}
         self._order: list[str] = []
         self._lock = threading.Lock()
 
-    def get(self, path) -> Cbz:
+    def get(self, path) -> ComicSource:
         key = book_key(path)
         with self._lock:
             if key in self._items:
                 self._order.remove(key)
                 self._order.append(key)
                 return self._items[key]
-            cb = Cbz(path)
+            cb = ComicSource(path)
             self._items[key] = cb
             self._order.append(key)
             while len(self._order) > self._limit:
@@ -193,4 +241,57 @@ class BookHandlePool:
             self._order.clear()
 
 
-POOL = BookHandlePool()
+POOL = SourcePool()
+
+
+# ================= 导入扫描：一个来源 -> 若干「话」 =================
+def scan_chapters(source) -> list[dict]:
+    """把用户选中的文件/文件夹拆成一话一话。
+
+    规则：
+      - 单个 .cbz/.zip            -> 一话（文件）
+      - 文件夹本身含图片           -> 一话（文件夹）
+      - 文件夹里含子文件夹         -> 每个含图片的子文件夹各算一话
+      - 文件夹里的 .cbz/.zip       -> 每个各算一话
+    """
+    p = Path(source)
+    out: list[dict] = []
+
+    def add(path: Path, kind: str, name: str | None = None):
+        out.append({"path": str(path), "kind": kind, "name": name or path.stem or path.name})
+
+    if p.is_file():
+        if is_zip_comic(p):
+            add(p, "file")
+        return out
+
+    if not p.is_dir():
+        return out
+
+    if has_images(p):
+        add(p, "dir", p.name)
+        return out
+
+    for child in sorted(list(p.iterdir()), key=lambda x: natkey(x.name)):
+        if child.name.startswith("."):
+            continue
+        if child.is_dir():
+            if has_images(child):
+                add(child, "dir", child.name)
+            else:
+                for f in sorted(child.rglob("*"), key=lambda x: natkey(str(x))):
+                    if is_zip_comic(f):
+                        add(f, "file", f.stem)
+        elif is_zip_comic(child):
+            add(child, "file", child.stem)
+    return out
+
+
+def has_any_comic(path) -> bool:
+    """拖拽时判断是否值得接手。"""
+    p = Path(path)
+    if p.is_file():
+        return is_zip_comic(p)
+    if p.is_dir():
+        return has_images(p) or bool(scan_chapters(p))
+    return False

@@ -1,11 +1,13 @@
-"""配置 / 历史记录 / 书架数据库 —— JSON 持久化（原子写入）。"""
+"""配置 / 书架(书→话两层) / 历史记录 —— JSON 持久化（原子写入）。"""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 
 if getattr(sys, "frozen", False):
@@ -17,14 +19,16 @@ DATA_DIR = APP_DIR / "data"
 CACHE_DIR = APP_DIR / "cache"
 COVER_DIR = CACHE_DIR / "covers"
 SIZE_DIR = CACHE_DIR / "sizes"
+BOOKCOVER_DIR = CACHE_DIR / "bookcovers"
 LIB_DIR = APP_DIR / "library"
 
-for _d in (DATA_DIR, CACHE_DIR, COVER_DIR, SIZE_DIR, LIB_DIR):
+for _d in (DATA_DIR, CACHE_DIR, COVER_DIR, SIZE_DIR, BOOKCOVER_DIR, LIB_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
 CONFIG_FILE = DATA_DIR / "config.json"
 HISTORY_FILE = DATA_DIR / "history.json"
-SHELF_FILE = DATA_DIR / "shelf.json"
+SHELF_FILE = DATA_DIR / "books.json"
+LEGACY_SHELF_FILE = DATA_DIR / "shelf.json"
 
 DEFAULTS = {
     "library_dir": str(LIB_DIR),
@@ -67,15 +71,35 @@ def _deep_merge(base: dict, over: dict) -> dict:
     return out
 
 
+def chapter_id(path) -> str:
+    """一话的 id：沿用文件路径哈希，保证老历史记录可无缝对应。"""
+    return hashlib.md5(str(Path(path)).lower().replace("\\", "/").encode("utf-8")).hexdigest()[:16]
+
+
+def new_book_id(seed: str | None = None) -> str:
+    if seed:
+        return "b" + hashlib.md5(seed.lower().encode("utf-8")).hexdigest()[:12]
+    return "b" + uuid.uuid4().hex[:12]
+
+
 class Store:
-    """线程安全的配置 + 数据存取。"""
+    """线程安全的配置 + 书库（书/话）+ 历史。
+
+    数据结构：
+      books    : bid -> {id, title, added, cover, note}
+      chapters : cid -> {id, book, path, name, kind, size, mtime, added}
+                 kind: "file"(cbz/zip) | "dir"(图片文件夹)
+      history  : cid -> {page, total, pos, time, count, finished, name}
+    """
 
     def __init__(self):
         self._lock = threading.RLock()
         self.config = _deep_merge(DEFAULTS, self._read(CONFIG_FILE, {}))
         self.history: dict = self._read(HISTORY_FILE, {})
-        self.shelf: dict = self._read(SHELF_FILE, {})   # key -> {path, name, size, mtime, added}
-        self._dirty = set()
+        data = self._read(SHELF_FILE, {})
+        self.books: dict = data.get("books", {})
+        self.chapters: dict = data.get("chapters", {})
+        self._migrate_legacy()
 
     # ---------- 底层 ----------
     @staticmethod
@@ -107,7 +131,39 @@ class Store:
         with self._lock:
             self._write(CONFIG_FILE, self.config)
             self._write(HISTORY_FILE, self.history)
-            self._write(SHELF_FILE, self.shelf)
+            self._write(SHELF_FILE, {"books": self.books, "chapters": self.chapters})
+
+    # ---------- 老数据迁移：扁平书架 -> 一书多话 ----------
+    def _migrate_legacy(self) -> None:
+        legacy = self._read(LEGACY_SHELF_FILE, None)
+        if not isinstance(legacy, dict) or not legacy:
+            return
+        if self.books:
+            return
+        groups: dict[str, list[dict]] = {}
+        for key, v in legacy.items():
+            p = Path(v.get("path", ""))
+            if not p.exists():
+                continue
+            groups.setdefault(str(p.parent), []).append({**v, "key": key, "path": str(p)})
+        for _parent, items in groups.items():
+            title = Path(_parent).name or "未命名书架"
+            bid = new_book_id(seed=f"legacy::{_parent}")
+            self.books[bid] = {"id": bid, "title": title, "added": time.time(),
+                               "cover": "", "note": "由旧版书架自动迁移"}
+            for v in items:
+                cid = v.get("key") or chapter_id(v["path"])
+                self.chapters[cid] = {
+                    "id": cid, "book": bid, "path": v["path"], "kind": "file",
+                    "name": Path(v["path"]).stem,
+                    "size": v.get("size", 0), "mtime": v.get("mtime", 0),
+                    "added": v.get("added", time.time()),
+                }
+        try:
+            LEGACY_SHELF_FILE.rename(LEGACY_SHELF_FILE.with_suffix(".json.migrated"))
+        except Exception:
+            pass
+        self.save_all()
 
     # ---------- 配置 ----------
     def cfg(self, path: str, default=None):
@@ -126,61 +182,184 @@ class Store:
                 node = node.setdefault(p, {})
             node[parts[-1]] = value
 
-    # ---------- 书架 ----------
-    def add_book(self, path: str, name: str, size: int, mtime: float) -> str:
-        from .cbr import book_key
-        key = book_key(path)
+    # ================= 书 =================
+    def add_book(self, title: str, note: str = "") -> str:
+        bid = new_book_id()
         with self._lock:
-            self.shelf[key] = {
-                "path": str(path), "name": name, "size": size,
-                "mtime": mtime, "added": time.time(),
+            self.books[bid] = {"id": bid, "title": title.strip() or "未命名书",
+                               "added": time.time(), "cover": "", "note": note}
+        return bid
+
+    def book(self, bid: str) -> dict | None:
+        with self._lock:
+            b = self.books.get(bid)
+            return dict(b) if b else None
+
+    def rename_book(self, bid: str, title: str) -> None:
+        with self._lock:
+            if bid in self.books:
+                self.books[bid]["title"] = title.strip() or self.books[bid]["title"]
+
+    def set_book_cover(self, bid: str, source: str) -> None:
+        """source: "" 自动（首话首图） | "cid:<话id>" | "file:<图片路径>" """
+        with self._lock:
+            if bid in self.books:
+                self.books[bid]["cover"] = source
+
+    def remove_book(self, bid: str) -> None:
+        """移除书及其话记录（不删除磁盘文件）。"""
+        with self._lock:
+            self.books.pop(bid, None)
+            for cid in [c for c, v in self.chapters.items() if v.get("book") == bid]:
+                self.chapters.pop(cid, None)
+                self.history.pop(cid, None)
+
+    def book_list(self) -> list[dict]:
+        with self._lock:
+            out = []
+            for bid, b in self.books.items():
+                e = dict(b)
+                e["stats"] = self.book_stats(bid)
+                out.append(e)
+            out.sort(key=lambda x: x.get("added", 0))
+            return out
+
+    def book_cover_source(self, bid: str):
+        """返回 (cid_or_None, custom_png_or_None)。"""
+        with self._lock:
+            b = self.books.get(bid)
+            if not b:
+                return None, None
+            cover = b.get("cover") or ""
+            if cover.startswith("file:"):
+                return None, cover[5:]
+            if cover.startswith("cid:"):
+                cid = cover[4:]
+                if cid in self.chapters:
+                    return cid, None
+            chs = self.chapters_of(bid)
+            return (chs[0]["id"] if chs else None), None
+
+    # ================= 话 =================
+    def add_chapter(self, bid: str, path: str, name: str = "", kind: str = "file",
+                    size: int = 0, mtime: float = 0.0) -> str:
+        cid = chapter_id(path)
+        p = Path(path)
+        with self._lock:
+            self.chapters[cid] = {
+                "id": cid, "book": bid, "path": str(p),
+                "kind": kind, "name": (name or p.stem or p.name).strip(),
+                "size": size or (p.stat().st_size if p.is_file() else 0),
+                "mtime": mtime or (p.stat().st_mtime if p.exists() else 0),
+                "added": time.time(),
             }
-        return key
+        return cid
 
-    def remove_book(self, key: str) -> None:
+    def chapter(self, cid: str) -> dict | None:
         with self._lock:
-            self.shelf.pop(key, None)
-            self.history.pop(key, None)
+            c = self.chapters.get(cid)
+            return dict(c) if c else None
 
-    def shelf_entries(self) -> list[dict]:
+    def chapters_of(self, bid: str) -> list[dict]:
+        from .cbr import natkey
         with self._lock:
-            items = []
-            for k, v in self.shelf.items():
-                if not Path(v.get("path", "")).exists():
-                    continue
-                e = dict(v)
-                e["key"] = k
-                items.append(e)
-            items.sort(key=lambda x: x.get("added", 0))
-            return items
+            items = [dict(v) for v in self.chapters.values() if v.get("book") == bid]
+        items.sort(key=lambda x: natkey(x.get("name", "")))
+        return items
 
-    # ---------- 历史 ----------
-    def touch_history(self, key: str, name: str, page: int, total: int,
+    def rename_chapter(self, cid: str, name: str) -> None:
+        with self._lock:
+            if cid in self.chapters and name.strip():
+                self.chapters[cid]["name"] = name.strip()
+
+    def remove_chapter(self, cid: str) -> None:
+        with self._lock:
+            self.chapters.pop(cid, None)
+
+    def chapter_book_title(self, cid: str) -> str:
+        with self._lock:
+            c = self.chapters.get(cid)
+            if not c:
+                return ""
+            return (self.books.get(c.get("book"), {}) or {}).get("title", "")
+
+    # ================= 进度 / 历史 =================
+    def touch_history(self, cid: str, name: str, page: int, total: int,
                       pos: float = 0.0, count: bool = False) -> None:
         with self._lock:
-            h = self.history.get(key) or {}
+            h = self.history.get(cid) or {}
             h["name"] = name
             h["page"] = int(page)
             h["total"] = int(total)
             h["pos"] = float(pos)
             h["time"] = time.time()
             h["count"] = int(h.get("count", 0)) + (1 if count else 0)
-            self.history[key] = h
+            self.history[cid] = h
 
-    def progress(self, key: str) -> dict | None:
+    def progress(self, cid: str) -> dict | None:
         with self._lock:
-            return self.history.get(key)
+            return self.history.get(cid)
 
-    def recent(self, limit: int = 12) -> list[dict]:
+    def mark_finished(self, cid: str, finished: bool = True) -> None:
+        with self._lock:
+            h = self.history.setdefault(cid, {})
+            h["finished"] = finished
+
+    def book_stats(self, bid: str) -> dict:
+        with self._lock:
+            chs = [dict(v) for v in self.chapters.values() if v.get("book") == bid]
+            total = len(chs)
+            read = finished = 0
+            last_time = 0.0
+            last_cid = ""
+            times = 0
+            for c in chs:
+                h = self.history.get(c["id"]) or {}
+                if h.get("total"):
+                    read += 1
+                    times += int(h.get("count", 0) or 0)
+                    if h.get("finished"):
+                        finished += 1
+                    if (h.get("time") or 0) > last_time:
+                        last_time = h["time"]
+                        last_cid = c["id"]
+            return {"chapters": total, "read": read, "finished": finished,
+                    "times": times, "last_time": last_time, "last_cid": last_cid,
+                    "ratio": (finished / total) if total else 0.0}
+
+    def last_chapter(self, bid: str) -> dict | None:
+        """继续阅读：最近读过但未读完的一话，否则第一话。"""
+        chs = self.chapters_of(bid)
+        if not chs:
+            return None
+        best, best_time = None, -1.0
+        for c in chs:
+            h = self.history.get(c["id"]) or {}
+            if h.get("total") and not h.get("finished"):
+                t = h.get("time") or 0
+                if t > best_time:
+                    best, best_time = c, t
+        if best:
+            return best
+        for c in chs:
+            if not (self.history.get(c["id"]) or {}).get("finished"):
+                return c
+        return chs[0]
+
+    def recent_chapters(self, limit: int = 12) -> list[dict]:
         with self._lock:
             items = []
-            for k, h in self.history.items():
-                if k not in self.shelf:
+            for cid, h in self.history.items():
+                c = self.chapters.get(cid)
+                if not c:
                     continue
                 e = dict(h)
-                e["key"] = k
-                e["path"] = self.shelf[k].get("path", "")
-                e["name"] = self.shelf[k].get("name", h.get("name", ""))
+                e["key"] = cid
+                e["path"] = c.get("path", "")
+                e["kind"] = c.get("kind", "file")
+                e["name"] = c.get("name", h.get("name", ""))
+                e["book"] = c.get("book", "")
+                e["book_title"] = (self.books.get(c.get("book")) or {}).get("title", "")
                 items.append(e)
             items.sort(key=lambda x: x.get("time", 0), reverse=True)
             return items[:limit]
@@ -189,10 +368,9 @@ class Store:
         with self._lock:
             self.history.clear()
 
-    def mark_finished(self, key: str, finished: bool = True) -> None:
-        with self._lock:
-            h = self.history.setdefault(key, {})
-            h["finished"] = finished
+    # ---- 兼容旧调用（历史页/统计用）----
+    def recent(self, limit: int = 12) -> list[dict]:
+        return self.recent_chapters(limit)
 
 
 STORE = Store()

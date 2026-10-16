@@ -1,18 +1,18 @@
-"""书架页：封面网格、继续阅读、搜索排序、批量选择、右键菜单、拖拽导入。"""
+"""书架页：以「书」为单位的封面墙（点进去才是各话列表）。"""
 from __future__ import annotations
 
 import os
 import subprocess
 from pathlib import Path
 
-from PySide6.QtCore import (QEvent, QPoint, QRect, QSize, Qt, QTimer, Signal)
-from PySide6.QtGui import QAction, QColor, QCursor, QFont, QFontMetrics, QPainter, QPixmap
-from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QLayout,
-                               QLineEdit, QMenu, QPushButton, QScrollArea,
-                               QSizePolicy, QVBoxLayout, QWidget)
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, Signal
+from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics, QPainter, QPixmap
+from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit,
+                               QMenu, QPushButton, QScrollArea, QVBoxLayout,
+                               QWidget)
 
 from .cbr import natkey
-from .store import STORE
+from .store import BOOKCOVER_DIR, COVER_DIR, STORE
 from .tasks import ASYNC
 from .theme import ACCENT
 
@@ -22,50 +22,6 @@ try:
     NO_ORIENTATIONS = Qt.Orientations(0)
 except Exception:  # pragma: no cover
     NO_ORIENTATIONS = Qt.Orientation(0)
-
-
-class RecentCard(QFrame):
-    """继续阅读卡片。"""
-
-    activated = Signal(str, str, str)   # path, name, key
-
-    def __init__(self, h: dict, parent=None):
-        super().__init__(parent)
-        self.setObjectName("RecentCard")
-        self.setFixedSize(190, 40)
-        self.setCursor(Qt.PointingHandCursor)
-        self._path = h.get("path", "")
-        self._name = h.get("name", "")
-        self._key = h["key"]
-
-        cl = QHBoxLayout(self)
-        cl.setContentsMargins(10, 4, 8, 4)
-        cl.setSpacing(8)
-        v = QVBoxLayout()
-        v.setContentsMargins(0, 0, 0, 0)
-        v.setSpacing(0)
-        nm = QLabel()
-        nm.setObjectName("RecentName")
-        fm = QFontMetrics(nm.font())
-        nm.setText(fm.elidedText(self._name, Qt.ElideMiddle, 148))
-        total = h.get("total", 0) or 0
-        pg = (h.get("page", 0) or 0) + 1
-        sub = QLabel(f"读到 {pg}/{total}" + (" · 已读完" if h.get("finished") else ""))
-        sub.setObjectName("RecentSub")
-        v.addWidget(nm)
-        v.addWidget(sub)
-        cl.addLayout(v, 1)
-        bar = QFrame()
-        bar.setFixedWidth(4)
-        bar.setStyleSheet(f"background:{ACCENT};border-radius:2px;")
-        cl.addWidget(bar)
-        self.setToolTip(self._path + "\n双击/单击继续阅读")
-
-    def mouseReleaseEvent(self, e):
-        if e.button() == Qt.LeftButton:
-            self.activated.emit(self._path, self._name, self._key)
-        super().mouseReleaseEvent(e)
-
 
 
 class FlowLayout(QLayout):
@@ -130,20 +86,20 @@ class FlowLayout(QLayout):
 
 
 class BookTile(QFrame):
-    clicked = Signal(str, object)          # key, modifiers
-    double_clicked = Signal(str)
+    """一本书的封面卡片。"""
+
+    activated = Signal(str)                     # bid
     context_menu = Signal(str, QPoint)
 
-    def __init__(self, entry: dict, parent=None):
+    def __init__(self, book: dict, parent=None):
         super().__init__(parent)
         self.setObjectName("BookTile")
-        self.setFixedSize(TILE_W, COVER_H + 52)
-        self.key = entry["key"]
-        self.path = entry["path"]
-        self.name = entry["name"]
-        self.setContextMenuPolicy(Qt.DefaultContextMenu)
+        self.setFixedSize(TILE_W, COVER_H + 56)
+        self.bid = book["id"]
+        self._hover = False
         self.setCursor(Qt.PointingHandCursor)
-        self._selected = False
+        self.setToolTip(f"{book['title']}\n共 {book['stats']['chapters']} 话"
+                        f"　已读完 {book['stats']['finished']} 话")
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(4, 4, 4, 4)
@@ -153,13 +109,12 @@ class BookTile(QFrame):
         self.cover.setFixedSize(COVER_W, COVER_H)
         self.cover.setAlignment(Qt.AlignCenter)
         self.cover.setStyleSheet(
-            f"background:#E9ECF0;border-radius:8px;color:#9AA2AC;font-size:11px;")
+            "background:#E9ECF0;border-radius:8px;color:#9AA2AC;font-size:11px;")
         lay.addWidget(self.cover, 0, Qt.AlignHCenter)
 
         self.badge = QLabel(self.cover)
-        self.badge.setStyleSheet(
-            "background:rgba(59,111,224,225);color:white;border-radius:6px;"
-            "padding:1px 6px;font-size:10px;font-weight:600;")
+        self.badge.setStyleSheet("background:rgba(59,111,224,225);color:white;border-radius:6px;"
+                                 "padding:1px 6px;font-size:10px;font-weight:600;")
         self.badge.hide()
 
         self.lbl = QLabel()
@@ -168,7 +123,6 @@ class BookTile(QFrame):
         f = QFont()
         f.setPointSize(9)
         self.lbl.setFont(f)
-        self.lbl.setToolTip(entry["path"])
         lay.addWidget(self.lbl)
 
         bar = QFrame()
@@ -176,114 +130,171 @@ class BookTile(QFrame):
         bar.setStyleSheet("background:#E3E6EA;border-radius:2px;")
         self.bar_in = QFrame(bar)
         self.bar_in.setGeometry(0, 0, 0, 4)
-        self.bar_in.setStyleSheet(f"background:{ACCENT};border-radius:2px;")
         lay.addWidget(bar, 0, Qt.AlignHCenter)
         self._bar = bar
 
-        self.update_progress(STORE.progress(self.key))
-        self.set_cover(entry["path"], entry["key"])
+        self.refresh(book)
 
     # ---------- 数据 ----------
-    def set_cover(self, path: str, key: str):
-        from .cbr import book_key
-        from .store import COVER_DIR
-        cached = COVER_DIR / f"{key}_420.jpg"
-        if cached.exists() and cached.stat().st_mtime >= Path(path).stat().st_mtime:
-            self.apply_cover(str(cached))
+    def refresh(self, book: dict):
+        self.bid = book["id"]
+        title = book["title"]
+        st = book["stats"]
+        self.lbl.setText(QFontMetrics(self.lbl.font()).elidedText(
+            title, Qt.ElideMiddle, COVER_W))
+        n = st["chapters"]
+        if n == 0:
+            self.badge.hide()
+            self.bar_in.setFixedWidth(0)
+            self.cover.setPixmap(QPixmap())
+            self.cover.setText("空书\n点此导入")
         else:
-            self.cover.setText("加载中…")
-            ASYNC.cover(path)
-
-    def apply_cover(self, cover_path: str):
-        pm = QPixmap(cover_path)
-        if pm.isNull():
-            return
-        pm = pm.scaled(COVER_W, COVER_H, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        self.cover.setPixmap(pm)
-        self.cover.setStyleSheet("background:#E9ECF0;border-radius:8px;")
-        self.badge.adjustSize()
-        self.badge.move(COVER_W - self.badge.width() - 6, 6)
-
-    def update_progress(self, h: dict | None):
-        name = self.name
-        fm = QFontMetrics(self.lbl.font())
-        self.lbl.setText(fm.elidedText(name, Qt.ElideMiddle, COVER_W))
-        total = (h or {}).get("total") or 0
-        page = (h or {}).get("page") or 0
-        if total:
-            ratio = 0.0 if (h or {}).get("finished") else min(1.0, (page + 1) / total)
-            self.bar_in.setFixedWidth(max(2, int(COVER_W * ratio)))
-            if (h or {}).get("finished"):
-                self.badge.setText("已读完")
-                self.badge.setStyleSheet(
-                    "background:rgba(46,158,91,235);color:white;border-radius:6px;"
-                    "padding:1px 6px;font-size:10px;font-weight:600;")
-            else:
-                self.badge.setText(f"{page + 1}/{total}")
-                self.badge.setStyleSheet(
-                    "background:rgba(59,111,224,225);color:white;border-radius:6px;"
-                    "padding:1px 6px;font-size:10px;font-weight:600;")
+            self.bar_in.setFixedWidth(max(2, int(COVER_W * st["ratio"])))
+            self.bar_in.setStyleSheet(
+                f"background:{'#2E9E5B' if st['ratio'] >= 1 else ACCENT};border-radius:2px;")
+            txt = f"已读完 {st['finished']}/{n}" if st["finished"] else f"{n} 话"
+            self.badge.setText(txt)
             self.badge.show()
             self.badge.adjustSize()
             self.badge.move(COVER_W - self.badge.width() - 6, 6)
-            self.lbl.setText(fm.elidedText(name, Qt.ElideMiddle, COVER_W - 34))
-        else:
-            self.bar_in.setFixedWidth(0)
-            self.badge.hide()
-        self.bar_in.setStyleSheet(
-            f"background:{'#2E9E5B' if (h or {}).get('finished') else ACCENT};border-radius:2px;")
+        self.load_cover()
 
-    # ---------- 选中态 ----------
-    def set_selected(self, on: bool):
-        self._selected = on
+    def load_cover(self):
+        cid, custom = STORE.book_cover_source(self.bid)
+        custom_file = BOOKCOVER_DIR / f"{self.bid}.jpg"
+        if custom:
+            pm = QPixmap(custom)
+            if not pm.isNull():
+                self._set_pixmap(pm)
+                return
+        if custom_file.exists():
+            pm = QPixmap(str(custom_file))
+            if not pm.isNull():
+                self._set_pixmap(pm)
+                return
+        if cid:
+            cached = COVER_DIR / f"{cid}_420.jpg"
+            if cached.exists():
+                pm = QPixmap(str(cached))
+                if not pm.isNull():
+                    self._set_pixmap(pm)
+                    return
+            self.cover.setPixmap(QPixmap())
+            self.cover.setText("加载中…")
+            ch = STORE.chapter(cid)
+            if ch:
+                ASYNC.cover(ch["path"])
+        else:
+            self.cover.setPixmap(QPixmap())
+            self.cover.setText("空书\n点此导入")
+
+    def _set_pixmap(self, pm: QPixmap):
+        self.cover.setText("")
+        self.cover.setPixmap(pm.scaled(COVER_W, COVER_H, Qt.KeepAspectRatio,
+                                       Qt.SmoothTransformation))
+        self.badge.adjustSize()
+        self.badge.move(COVER_W - self.badge.width() - 6, 6)
+
+    def on_chapter_cover(self, cid: str, path: str):
+        target_cid, _custom = STORE.book_cover_source(self.bid)
+        if cid == target_cid:
+            pm = QPixmap(path)
+            if not pm.isNull():
+                self._set_pixmap(pm)
+
+    # ---------- 交互 ----------
+    def enterEvent(self, e):
+        self._hover = True
         self.update()
+        super().enterEvent(e)
+
+    def leaveEvent(self, e):
+        self._hover = False
+        self.update()
+        super().leaveEvent(e)
 
     def paintEvent(self, e):
         super().paintEvent(e)
-        if self._selected:
+        if self._hover:
             p = QPainter(self)
             p.setPen(QColor(ACCENT))
-            p.setBrush(QColor(232, 239, 252, 90))
+            p.setBrush(Qt.NoBrush)
             p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 10, 10)
             p.end()
 
-    # ---------- 交互 ----------
-    def _key(self):
-        return self.key
-
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
-            self.clicked.emit(self.key, e.modifiers())
+            self.activated.emit(self.bid)
         elif e.button() == Qt.RightButton:
-            self.context_menu.emit(self.key, e.globalPosition().toPoint())
+            self.context_menu.emit(self.bid, e.globalPosition().toPoint())
         super().mousePressEvent(e)
 
-    def mouseDoubleClickEvent(self, e):
+
+class RecentCard(QFrame):
+    """继续阅读卡片（章节级）。"""
+
+    activated = Signal(str, str, str)   # path, name, cid
+
+    def __init__(self, h: dict, parent=None):
+        super().__init__(parent)
+        self.setObjectName("RecentCard")
+        self.setFixedSize(210, 42)
+        self.setCursor(Qt.PointingHandCursor)
+        self._cid = h.get("key", "")
+        self._path = h.get("path", "")
+        self._name = h.get("name", "")
+        self._title = h.get("book_title") or self._name
+
+        cl = QHBoxLayout(self)
+        cl.setContentsMargins(10, 4, 8, 4)
+        cl.setSpacing(8)
+        v = QVBoxLayout()
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(0)
+        nm = QLabel()
+        nm.setObjectName("RecentName")
+        nm.setText(QFontMetrics(nm.font()).elidedText(self._title, Qt.ElideMiddle, 168))
+        total = h.get("total", 0) or 0
+        pg = (h.get("page", 0) or 0) + 1
+        sub = QLabel(f"{self._name} · {pg}/{total}" if total else self._name)
+        sub.setObjectName("RecentSub")
+        v.addWidget(nm)
+        v.addWidget(sub)
+        cl.addLayout(v, 1)
+        bar = QFrame()
+        bar.setFixedWidth(4)
+        bar.setStyleSheet(f"background:{ACCENT};border-radius:2px;")
+        cl.addWidget(bar)
+        self.setToolTip(f"{self._title} · {self._name}\n{self._path}")
+
+    def mouseReleaseEvent(self, e):
         if e.button() == Qt.LeftButton:
-            self.double_clicked.emit(self.key)
-        super().mouseDoubleClickEvent(e)
+            self.activated.emit(self._path, self._name, self._cid)
+        super().mouseReleaseEvent(e)
 
 
 class ShelfPage(QWidget):
-    open_book = Signal(str, str, str)      # path, name, key
-    import_requested = Signal()
+    """书架：书封面墙 + 继续阅读 + 新增书 / 导入。"""
+
+    open_book = Signal(str)             # bid -> 书详情
+    open_chapter = Signal(str, str, str)  # path, name, cid -> 直接开读
+    new_book_requested = Signal()
+    import_to_book = Signal(str)        # bid（向这本书导入话）
+    rename_book = Signal(str)
+    cover_requested = Signal(str)
     toast = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__()
         self.setObjectName("Page")
         self._tiles: dict[str, BookTile] = {}
-        self._sel: set[str] = set()
-        self._last_click = ""
         self._keyword = ""
         self._sort = "added"
-        self._recent_limit = 12
 
         root = QVBoxLayout(self)
         root.setContentsMargins(18, 12, 18, 12)
         root.setSpacing(10)
 
-        # ---- 头栏 ----
         head = QHBoxLayout()
         head.setSpacing(8)
         self.lbl_count = QLabel("")
@@ -294,31 +305,31 @@ class ShelfPage(QWidget):
         self.search = QLineEdit()
         self.search.setObjectName("SearchBox")
         self.search.setPlaceholderText("搜索书名…")
-        self.search.setFixedWidth(200)
+        self.search.setFixedWidth(180)
         self.search.textChanged.connect(self._on_search)
         head.addWidget(self.search)
 
-        self.cmb_sort = QPushButton("添加时间")
-        self.cmb_sort.setObjectName("Ghost")
-        self.cmb_sort.setCursor(Qt.PointingHandCursor)
-        menu = QMenu(self.cmb_sort)
-        for label, val in (("添加时间", "added"), ("书名", "name"), ("最近阅读", "recent"),
-                           ("文件大小", "size")):
+        self.btn_sort = QPushButton("添加时间")
+        self.btn_sort.setObjectName("Ghost")
+        self.btn_sort.setCursor(Qt.PointingHandCursor)
+        menu = QMenu(self.btn_sort)
+        for label, val in (("添加时间", "added"), ("书名", "name"),
+                           ("最近阅读", "recent"), ("话数", "chapters")):
             a = QAction(label, menu)
             a.triggered.connect(lambda _=False, v=val, t=label: self._set_sort(v, t))
             menu.addAction(a)
-        self.cmb_sort.setMenu(menu)
-        head.addWidget(self.cmb_sort)
+        self.btn_sort.setMenu(menu)
+        head.addWidget(self.btn_sort)
 
-        self.btn_import = QPushButton("＋ 批量导入")
-        self.btn_import.setObjectName("Primary")
-        self.btn_import.setCursor(Qt.PointingHandCursor)
-        self.btn_import.setToolTip("选择 CBZ 文件或整个文件夹（支持递归扫描）")
-        self.btn_import.clicked.connect(self.import_requested)
-        head.addWidget(self.btn_import)
+        self.btn_new = QPushButton("＋ 新增书")
+        self.btn_new.setObjectName("Primary")
+        self.btn_new.setCursor(Qt.PointingHandCursor)
+        self.btn_new.setToolTip("新建一本书，然后往里面导入各话")
+        self.btn_new.clicked.connect(self.new_book_requested)
+        head.addWidget(self.btn_new)
         root.addLayout(head)
 
-        # ---- 继续阅读 ----
+        # ---- 继续阅读（章节级）----
         self.recent_box = QFrame()
         self.recent_box.setObjectName("Card")
         rb = QVBoxLayout(self.recent_box)
@@ -335,7 +346,7 @@ class ShelfPage(QWidget):
         rb.addLayout(rhead)
         self.recent_scroll = QScrollArea()
         self.recent_scroll.setWidgetResizable(True)
-        self.recent_scroll.setFixedHeight(50)
+        self.recent_scroll.setFixedHeight(52)
         self.recent_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.recent_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.recent_inner = QWidget()
@@ -347,7 +358,7 @@ class ShelfPage(QWidget):
         rb.addWidget(self.recent_scroll)
         root.addWidget(self.recent_box)
 
-        # ---- 网格 ----
+        # ---- 书封面墙 ----
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.grid_host = QWidget()
@@ -355,57 +366,36 @@ class ShelfPage(QWidget):
         self.scroll.setWidget(self.grid_host)
         root.addWidget(self.scroll, 1)
 
-        # ---- 空态 ----
-        self.empty = QLabel("书架空空如也\n点击右上角「批量导入」或直接把 .cbz 拖进窗口")
+        self.empty = QLabel("书架还是空的\n点右上角「＋ 新增书」建一本书，再往书里导入各话；\n"
+                            "也可以直接把 .cbz 或图片文件夹拖进窗口")
         self.empty.setAlignment(Qt.AlignCenter)
-        self.empty.setStyleSheet("color:#9AA2AC;font-size:13px;line-height:170%;")
+        self.empty.setStyleSheet("color:#9AA2AC;font-size:13px;line-height:180%;")
         root.addWidget(self.empty, 1)
-
-        # ---- 批量操作条 ----
-        self.sel_bar = QFrame(self)
-        self.sel_bar.setObjectName("Card")
-        sl = QHBoxLayout(self.sel_bar)
-        sl.setContentsMargins(12, 6, 12, 6)
-        sl.setSpacing(8)
-        self.lbl_sel = QLabel("已选 0 本")
-        sl.addWidget(self.lbl_sel)
-        sl.addStretch(1)
-        b1 = QPushButton("标记已读"); b1.setObjectName("Ghost")
-        b2 = QPushButton("标记未读"); b2.setObjectName("Ghost")
-        b3 = QPushButton("移出书架"); b3.setObjectName("Danger")
-        for b in (b1, b2, b3):
-            b.setCursor(Qt.PointingHandCursor)
-            sl.addWidget(b)
-        b1.clicked.connect(lambda: self._bulk_mark(True))
-        b2.clicked.connect(lambda: self._bulk_mark(False))
-        b3.clicked.connect(self._bulk_remove)
-        self.sel_bar.hide()
 
         ASYNC.sig.cover.connect(self._on_cover)
         self.refresh()
 
-    # ================= 数据渲染 =================
-    def refresh(self):
-        self.rebuild_recent()
-        self.rebuild_grid()
-
-    def _entries(self) -> list[dict]:
-        items = STORE.shelf_entries()
+    # ================= 渲染 =================
+    def _books(self) -> list[dict]:
+        items = STORE.book_list()
         if self._keyword:
             kw = self._keyword.lower()
-            items = [e for e in items if kw in e["name"].lower()]
+            items = [b for b in items if kw in b["title"].lower()]
         if self._sort == "name":
-            items.sort(key=lambda e: natkey(e["name"]))
-        elif self._sort == "size":
-            items.sort(key=lambda e: e.get("size", 0), reverse=True)
+            items.sort(key=lambda b: natkey(b["title"]))
         elif self._sort == "recent":
-            hist = STORE.history
-            items.sort(key=lambda e: hist.get(e["key"], {}).get("time", 0), reverse=True)
+            items.sort(key=lambda b: b["stats"]["last_time"], reverse=True)
+        elif self._sort == "chapters":
+            items.sort(key=lambda b: b["stats"]["chapters"], reverse=True)
         else:
-            items.sort(key=lambda e: e.get("added", 0))
+            items.sort(key=lambda b: b.get("added", 0))
         return items
 
-    def rebuild_grid(self):
+    def refresh(self):
+        self._rebuild_recent()
+        self._rebuild_grid()
+
+    def _rebuild_grid(self):
         while self.flow.count():
             it = self.flow.takeAt(0)
             w = it.widget()
@@ -414,201 +404,107 @@ class ShelfPage(QWidget):
                 w.deleteLater()
         self._tiles.clear()
 
-        entries = self._entries()
-        for e in entries:
-            tile = BookTile(e)
-            tile.clicked.connect(self._on_tile_click)
-            tile.double_clicked.connect(self._on_tile_open)
-            tile.context_menu.connect(self._on_tile_menu)
+        books = self._books()
+        for b in books:
+            tile = BookTile(b)
+            tile.activated.connect(self.open_book)
+            tile.context_menu.connect(self._menu)
             self.flow.addWidget(tile)
-            self._tiles[e["key"]] = tile
-            if e["key"] in self._sel:
-                tile.set_selected(True)
+            self._tiles[b["id"]] = tile
 
-        total = len(STORE.shelf_entries())
-        read = sum(1 for e in STORE.shelf_entries()
-                   if STORE.progress(e["key"]) and STORE.progress(e["key"]).get("total"))
-        self.lbl_count.setText(f"我的书架 · {total} 本" + (f"（{len(entries)} 匹配）" if self._keyword else ""))
-        self.lbl_recent_hint.setText(f"已读过 {read} 本" if read else "")
-        self.empty.setVisible(total == 0)
-        self.scroll.setVisible(total > 0)
-        self.recent_box.setVisible(bool(STORE.recent(1)))
-        self._sync_sel_bar()
+        all_books = STORE.book_list()
+        total_ch = sum(b["stats"]["chapters"] for b in all_books)
+        self.lbl_count.setText(
+            f"我的书架 · {len(all_books)} 本书 / {total_ch} 话"
+            + (f"（{len(books)} 本匹配）" if self._keyword else ""))
+        self.empty.setVisible(not all_books)
+        self.scroll.setVisible(bool(all_books))
 
-    def rebuild_recent(self):
+    def _rebuild_recent(self):
         while self.recent_lay.count() > 1:
             it = self.recent_lay.takeAt(0)
             w = it.widget()
             if w:
                 w.setParent(None)
                 w.deleteLater()
-        for h in STORE.recent(self._recent_limit):
+        items = STORE.recent_chapters(12)
+        for h in items:
             card = RecentCard(h)
-            card.activated.connect(self.open_book)
+            card.activated.connect(self.open_chapter)
             self.recent_lay.insertWidget(self.recent_lay.count() - 1, card)
+        self.recent_box.setVisible(bool(items))
+        if items:
+            n = len(STORE.recent_chapters(999))
+            self.lbl_recent_hint.setText(f"最近读过 {n} 话")
 
-    def _on_cover(self, key: str, cover_path: str):
-        tile = self._tiles.get(key)
-        if tile:
-            tile.apply_cover(cover_path)
+    def _on_cover(self, cid: str, cover_path: str):
+        for tile in self._tiles.values():
+            tile.on_chapter_cover(cid, cover_path)
 
-    def on_progress_changed(self, key: str):
-        tile = self._tiles.get(key)
-        if tile:
-            tile.update_progress(STORE.progress(key))
-
-    # ================= 交互 =================
     def _on_search(self, text: str):
         self._keyword = text.strip()
-        self.rebuild_grid()
+        self._rebuild_grid()
 
     def _set_sort(self, val: str, label: str):
         self._sort = val
-        self.cmb_sort.setText(label)
-        self.rebuild_grid()
-
-    def _on_tile_click(self, key: str, mods):
-        if mods & (Qt.ControlModifier | Qt.ShiftModifier):
-            if key in self._sel:
-                self._sel.discard(key)
-            else:
-                self._sel.add(key)
-        else:
-            self._sel = {key} if self._sel != {key} else set()
-        self._last_click = key
-        for k, t in self._tiles.items():
-            t.set_selected(k in self._sel)
-        self._sync_sel_bar()
-
-    def _on_tile_open(self, key: str):
-        e = STORE.shelf.get(key)
-        if e:
-            self.open_book.emit(e["path"], e["name"], key)
-
-    def _sync_sel_bar(self):
-        n = len(self._sel)
-        self.lbl_sel.setText(f"已选 {n} 本")
-        self.sel_bar.setVisible(n > 0)
-        if n > 0:
-            self.sel_bar.setGeometry(24, self.height() - 58, min(660, self.width() - 48), 44)
-
-    def resizeEvent(self, e):
-        self._sync_sel_bar()
-        super().resizeEvent(e)
-
-    # ================= 批量操作 =================
-    def _bulk_mark(self, done: bool):
-        for k in list(self._sel):
-            h = STORE.progress(k)
-            total = (h or {}).get("total") or 0
-            if not total:
-                try:
-                    from .cbr import Cbz
-                    p = STORE.shelf.get(k, {}).get("path")
-                    if p:
-                        cb = Cbz(p)
-                        total = cb.page_count
-                        cb.close()
-                except Exception:
-                    total = 0
-            STORE.touch_history(k, STORE.shelf.get(k, {}).get("name", ""),
-                                0 if done else 0, total)
-            STORE.mark_finished(k, done)
-        self.toast.emit(f"已标记 {len(self._sel)} 本为{'已读' if done else '未读'}")
-        self.refresh()
-
-    def _bulk_remove(self):
-        n = len(self._sel)
-        for k in list(self._sel):
-            STORE.remove_book(k)
-        self._sel.clear()
-        STORE.save_all()
-        self.toast.emit(f"已从书架移除 {n} 本（文件保留在磁盘）")
-        self.refresh()
+        self.btn_sort.setText(label)
+        self._rebuild_grid()
 
     # ================= 右键菜单 =================
-    def _on_tile_menu(self, key: str, pos: QPoint):
-        e = STORE.shelf.get(key)
-        if not e:
+    def _menu(self, bid: str, pos: QPoint):
+        b = STORE.book(bid)
+        if not b:
             return
-        path = e["path"]
-        menu = QMenu(self)
-        h = STORE.progress(key) or {}
-        act_open = menu.addAction(f"继续阅读（第 {h.get('page', 0) + 1} 页）" if h.get("total")
-                                  else "开始阅读")
-        menu.addSeparator()
-        act_read = menu.addAction("标记为已读")
-        act_unread = menu.addAction("标记为未读")
-        menu.addSeparator()
-        act_loc = menu.addAction("在文件夹中显示")
-        act_rm = menu.addAction("从书架移除")
-        act_del = menu.addAction("删除文件（移入回收站）")
-        chosen = menu.exec(pos)
+        st = STORE.book_stats(bid)
+        m = QMenu(self)
+        a_open = m.addAction("打开（查看各话）")
+        a_resume = m.addAction("继续阅读" if st["chapters"] else "先导入各话")
+        m.addSeparator()
+        a_import = m.addAction("导入话数…")
+        a_rename = m.addAction("重命名…")
+        a_cover = m.addAction("设置封面…")
+        m.addSeparator()
+        a_reveal = m.addAction("在文件夹中显示")
+        a_remove = m.addAction("从书架移除（保留文件）")
+        chosen = m.exec(pos)
         if chosen is None:
             return
-        if chosen == act_open:
-            self.open_book.emit(path, e["name"], key)
-        elif chosen == act_read:
-            self._sel = {key}
-            self._bulk_mark(True)
-        elif chosen == act_unread:
-            self._sel = {key}
-            self._bulk_mark(False)
-        elif chosen == act_loc:
-            reveal_in_explorer(path)
-        elif chosen == act_rm:
-            STORE.remove_book(key)
+        if chosen == a_open:
+            self.open_book.emit(bid)
+        elif chosen == a_resume:
+            last = STORE.last_chapter(bid)
+            if last:
+                self.open_chapter.emit(last["path"], last["name"], last["id"])
+            else:
+                self.import_to_book.emit(bid)
+        elif chosen == a_import:
+            self.import_to_book.emit(bid)
+        elif chosen == a_rename:
+            self.rename_book.emit(bid)
+        elif chosen == a_cover:
+            self.cover_requested.emit(bid)
+        elif chosen == a_reveal:
+            chs = STORE.chapters_of(bid)
+            if chs:
+                reveal_in_explorer(chs[0]["path"])
+            else:
+                self.toast.emit("这本书还没有内容")
+        elif chosen == a_remove:
+            STORE.remove_book(bid)
             STORE.save_all()
-            self.toast.emit("已从书架移除（文件保留）")
+            self.toast.emit(f"已从书架移除《{b['title']}》（文件保留在磁盘）")
             self.refresh()
-        elif chosen == act_del:
-            from PySide6.QtWidgets import QMessageBox
-            r = QMessageBox.question(
-                self, "删除文件",
-                f"将文件移入回收站？\n\n{e['name']}\n{path}\n\n（可从回收站还原）",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-            if r == QMessageBox.Yes:
-                if recycle_file(path):
-                    STORE.remove_book(key)
-                    STORE.save_all()
-                    self.toast.emit("已移入回收站")
-                    self.refresh()
-                else:
-                    self.toast.emit("删除失败，文件可能被占用")
 
 
 # ================= 工具 =================
 def reveal_in_explorer(path: str) -> None:
     try:
         p = Path(path)
+        if not p.exists():
+            return
         if os.name == "nt":
-            subprocess.Popen(["explorer", "/select,", str(p)])
+            subprocess.Popen(f'explorer /select,"{p}"' if p.is_file() else f'explorer "{p}"')
         else:
-            subprocess.Popen(["xdg-open", str(p.parent)])
+            subprocess.Popen(["xdg-open", str(p if p.is_dir() else p.parent)])
     except Exception:
         pass
-
-
-def recycle_file(path: str) -> bool:
-    """移入回收站（不使用永久删除）。"""
-    try:
-        import ctypes
-        from ctypes import wintypes
-
-        class SHFILEOPSTRUCTW(ctypes.Structure):
-            _fields_ = [
-                ("hwnd", wintypes.HWND), ("wFunc", wintypes.UINT),
-                ("pFrom", wintypes.LPCWSTR), ("pTo", wintypes.LPCWSTR),
-                ("fFlags", ctypes.c_uint16), ("fAnyOperationsAborted", wintypes.BOOL),
-                ("hNameMappings", ctypes.c_void_p), ("lpszProgressTitle", wintypes.LPCWSTR),
-            ]
-
-        FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION = 3, 0x40, 0x10
-        op = SHFILEOPSTRUCTW()
-        op.wFunc = FO_DELETE
-        op.pFrom = str(Path(path).resolve()) + "\0\0"
-        op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION
-        res = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
-        return res == 0
-    except Exception:
-        return False

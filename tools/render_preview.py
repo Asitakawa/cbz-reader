@@ -39,40 +39,55 @@ def main() -> int:
     win.show()
     pump(1.0)
 
-    if len(STORE.shelf_entries()) < 74:
+    # 保证至少有一本书（首次运行会把旧书架迁移成《O1》）
+    if not STORE.book_list() and Path(DEMO).exists():
         win.start_import([DEMO], copy=False)
-        pump(20, lambda: len(STORE.shelf_entries()) >= 74)
+        pump(30, lambda: bool(STORE.book_list()))
+    books = STORE.book_list()
+    if not books:
+        print("书架为空，无法生成预览")
+        return 1
+    target = max(books, key=lambda b: b["stats"]["chapters"])
 
+    # 1. 书架（书封面墙）
     win.switch(0)
     pump(1.0)
-    pump(12, lambda: all(t.cover.pixmap() and not t.cover.pixmap().isNull()
-                         for t in list(win.shelf_page._tiles.values())[:12]))
+    pump(15, lambda: all(t.cover.pixmap() and not t.cover.pixmap().isNull()
+                         for t in list(win.shelf_page._tiles.values())[:1]))
     win.grab().save(str(OUT / "01_书架.png"))
 
-    entries = sorted(STORE.shelf_entries(), key=lambda e: e["name"])
-    e = next((x for x in entries if "13" in x["name"]), entries[0])
-    win.open_book(e["path"], e["name"], e["key"])
-    pump(3, lambda: win.reader_page.view.pixmap(0) is not None)
-    win.grab().save(str(OUT / "02_阅读器_滚动.png"))
+    # 2. 书详情（各话列表）
+    win.open_book_detail(target["id"])
+    pump(2.5, lambda: len(win.book_page._rows) > 0)
+    pump(2.0)
+    win.grab().save(str(OUT / "02_书详情.png"))
 
-    win.reader_page.view.set_page(min(2, win.reader_page.view.total - 1), animate=False)
+    # 3. 阅读器
+    chs = STORE.chapters_of(target["id"])
+    pick = chs[min(len(chs) - 1, len(chs) // 3)]
+    win.open_chapter(pick["path"], pick["name"], pick["id"])
+    pump(4, lambda: win.reader_page.view.pixmap(0) is not None)
     pump(1.5)
+    win.grab().save(str(OUT / "03_阅读器_滚动.png"))
+    win.reader_page.view.set_page(min(2, win.reader_page.view.total - 1), animate=False)
     win.reader_page.view.toggle_mode()
     pump(6, lambda: win.reader_page.view.pixmap(win.reader_page.view.current) is not None)
-    win.grab().save(str(OUT / "03_阅读器_单页.png"))
-    win.reader_page.back_requested.emit()
+    pump(1.0)
+    win.grab().save(str(OUT / "04_阅读器_单页.png"))
+    win.back_from_reader()
     pump(1.0)
 
+    # 4. 历史 / 设置
     win.switch(1)
-    pump(1.2)
-    win.grab().save(str(OUT / "04_历史记录.png"))
-
+    pump(1.5)
+    win.grab().save(str(OUT / "05_历史记录.png"))
     win.switch(2)
     pump(0.8)
-    win.grab().save(str(OUT / "05_设置.png"))
+    win.grab().save(str(OUT / "06_设置.png"))
 
-    for skin, name in (("excel", "06_伪装_Excel.png"), ("word", "07_伪装_Word.png"),
-                       ("term", "08_伪装_CMD.png")):
+    # 5. 伪装皮肤
+    for skin, name in (("excel", "07_伪装_Excel.png"), ("word", "08_伪装_Word.png"),
+                       ("term", "09_伪装_CMD.png")):
         STORE.set_cfg("camo.skin", skin)
         win.camo.apply_skin(skin)
         if not win._camo:
@@ -82,17 +97,17 @@ def main() -> int:
     win.toggle_camo()
     pump(0.4)
 
-    # 边缘小窗
+    # 6. 边缘小窗
     e = win.edge
     e.set_shape("strip")
     e.set_side("right")
     pump(0.6)
     e.start()
     pump(0.4)
-    e.grab().save(str(OUT / "09_边缘小窗_收起.png"))
+    e.grab().save(str(OUT / "10_边缘小窗_收起.png"))
     e.expand()
     pump(1.0)
-    e.grab().save(str(OUT / "10_边缘小窗_展开.png"))
+    e.grab().save(str(OUT / "11_边缘小窗_展开.png"))
     e.collapse()
     pump(0.5)
 

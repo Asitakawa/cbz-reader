@@ -292,35 +292,43 @@ class EdgePanel(QWidget):
         STORE.set_cfg("edge.auto_peek", self.auto_peek)
 
     # ================= 数据同步 =================
-    def set_book(self, path: str, name: str, key: str = ""):
+    def set_book(self, path: str, name: str, key: str = "", book_title: str = ""):
         key = key or book_key(path)
-        self._book = {"path": path, "name": name, "key": key}
-        self.lbl_name.setText(name)
-        self.lbl_name.setToolTip(path)
+        self._book = {"path": path, "name": name, "key": key,
+                      "book_title": book_title or name}
+        self.lbl_name.setText(self._book["book_title"])
+        self.lbl_name.setToolTip(f"{self._book['book_title']}\n{name}\n{path}")
         self.btn_resume.setText("继续阅读")
         self._load_cover(key, path)
-        self.set_progress(0, 0)
+        self.set_progress(0, 0, name)
 
-    def set_progress(self, page: int, total: int):
+    def set_progress(self, page: int, total: int, chapter: str = ""):
         ratio = 0.0 if not total else min(1.0, (page + 1) / total)
         self.v_fill.setGeometry(0, int(VBAR_H * (1 - ratio)), 5, max(0, int(VBAR_H * ratio)))
         self.fill.setFixedWidth(int(BAR_W * ratio) if total else 0)
         self.fill.setGeometry(0, 0, int(BAR_W * ratio) if total else 0, 4)
-        self.lbl_page.setText(f"第 {page + 1} / {total} 页" if total else "未开始阅读")
+        ch = chapter or (self._book or {}).get("name", "")
+        if total:
+            head = f"{ch} · " if ch else ""
+            self.lbl_page.setText(f"{head}第 {page + 1} / {total} 页")
+        else:
+            self.lbl_page.setText(ch or "未开始阅读")
 
     def set_recent(self, h: dict | None):
         if not h:
             self._book = None
             self.lbl_name.setText("还没有阅读记录")
-            self.lbl_page.setText("把 .cbz 拖进窗口即可导入")
+            self.lbl_page.setText("点封面条打开书架")
             self.btn_resume.setText("打开书架")
             self.v_fill.setGeometry(0, VBAR_H, 5, 0)
             self.fill.setGeometry(0, 0, 0, 4)
             self.cover.setPixmap(QPixmap())
             self.cover.setText("空")
             return
-        self.set_book(h.get("path", ""), h.get("name", ""), h.get("key", ""))
-        self.set_progress(int(h.get("page", 0) or 0), int(h.get("total", 0) or 0))
+        self.set_book(h.get("path", ""), h.get("name", ""), h.get("key", ""),
+                      book_title=h.get("book_title", "") or h.get("name", ""))
+        self.set_progress(int(h.get("page", 0) or 0), int(h.get("total", 0) or 0),
+                          h.get("name", ""))
 
     def set_recent_list(self, items: list[dict]):
         """最近在读快捷列表（最多 3 条）。"""
@@ -336,8 +344,10 @@ class EdgePanel(QWidget):
         for h in rows:
             total = h.get("total", 0) or 0
             pos = f"{int(h.get('page', 0) or 0) + 1}/{total}" if total else "未读"
+            book = h.get("book_title", "")
             name = h.get("name", "")
-            b = QPushButton(f"{name[:16]}   {pos}")
+            label = f"{book} · {name}" if book else name
+            b = QPushButton(f"{label[:18]}   {pos}")
             b.setCursor(Qt.PointingHandCursor)
             b.setFixedHeight(22)
             b.setToolTip(h.get("path", ""))

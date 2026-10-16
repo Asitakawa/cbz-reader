@@ -86,7 +86,8 @@ class HistoryRow(QFrame):
         name = QLabel()
         name.setStyleSheet("color:#1B1E23;font-size:12px;font-weight:600;")
         fm = QFontMetrics(name.font())
-        name.setText(fm.elidedText(self._name, Qt.ElideMiddle, 380))
+        label = f"{h.get('book_title')} · {self._name}" if h.get("book_title") else self._name
+        name.setText(fm.elidedText(label, Qt.ElideMiddle, 400))
         total = h.get("total", 0) or 0
         page = (h.get("page", 0) or 0) + 1
         ratio = 0.0 if not total else min(1.0, page / total)
@@ -185,30 +186,30 @@ class HistoryPage(QWidget):
             if w:
                 w.setParent(None)
                 w.deleteLater()
-        items = STORE.recent(200)
+        items = STORE.recent_chapters(200)
         for h in items:
             row = HistoryRow(h)
             row.resume.connect(self.open_book)
             row.remove.connect(self._remove_one)
             self.lay.insertWidget(self.lay.count() - 1, row)
 
-        total_books = len(STORE.shelf_entries())
-        read = sum(1 for e in STORE.shelf_entries()
-                   if (STORE.progress(e["key"]) or {}).get("total"))
-        finished = sum(1 for e in STORE.shelf_entries()
-                       if (STORE.progress(e["key"]) or {}).get("finished"))
-        times = sum((STORE.progress(e["key"]) or {}).get("count", 0)
-                    for e in STORE.shelf_entries())
-        pages = sum((STORE.progress(e["key"]) or {}).get("total", 0)
-                    for e in STORE.shelf_entries()
-                    if (STORE.progress(e["key"]) or {}).get("finished"))
-        self.s1.set_value(str(read))
+        books = STORE.book_list()
+        read_books = sum(1 for b in books if b["stats"]["read"])
+        finished = sum(b["stats"]["finished"] for b in books)
+        times = sum(b["stats"]["times"] for b in books)
+        pages = 0
+        for b in books:
+            for c in STORE.chapters_of(b["id"]):
+                h = STORE.progress(c["id"]) or {}
+                if h.get("finished"):
+                    pages += int(h.get("total", 0) or 0)
+        self.s1.set_value(str(read_books))
         self.s2.set_value(str(finished))
         self.s3.set_value(str(times))
         self.s4.set_value(str(pages))
         self.empty.setVisible(not items)
         self.scroll.setVisible(bool(items))
-        self.s1.lbl_l.setText(f"在读书籍 / 共 {total_books} 本")
+        self.s1.lbl_l.setText(f"在读书籍 / 共 {len(books)} 本")
 
     def _remove_one(self, key: str):
         STORE.history.pop(key, None)
