@@ -67,6 +67,16 @@ def make_icon() -> None:
 
 def pyinstaller() -> Path:
     step("2/6 PyInstaller 打包")
+    target = DIST / APP_NAME
+    if target.exists():
+        # 不直接删除旧产物（避免大批量删除），先挪到 build/ 下留底
+        stale = BUILD / f"prev_app_{int(time.time())}"
+        stale.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.move(str(target), str(stale))
+            print(f"  旧产物已挪至 {stale}")
+        except Exception as e:
+            print(f"  挪动旧产物失败：{e!r}")
     cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
            "--windowed", "--name", APP_NAME,
            "--icon", str(ASSETS / "icon.ico"),
@@ -115,10 +125,10 @@ def verify_frozen(app_dir: Path) -> bool:
 
 def assemble_payload(app_dir: Path) -> None:
     step("4/6 组装安装负载")
-    if PAYLOAD.exists():
-        shutil.rmtree(PAYLOAD, ignore_errors=True)
     PAYLOAD.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(app_dir, PAYLOAD / APP_NAME)
+    dest_app = PAYLOAD / APP_NAME
+    dest_app.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(app_dir, dest_app, dirs_exist_ok=True)
     for name in ("install.cmd", "install.ps1", "uninstall.ps1"):
         shutil.copy2(ROOT / "packaging" / name, PAYLOAD / name)
     shutil.copy2(ROOT / "README.md", PAYLOAD / "README.md")
