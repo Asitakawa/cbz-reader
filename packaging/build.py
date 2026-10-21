@@ -21,7 +21,7 @@ DIST = ROOT / "dist"
 BUILD = ROOT / "build"
 PAYLOAD = ROOT / "packaging" / "out" / "payload"
 APP_NAME = "CBZReader"
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 SETUP_NAME = f"CBZReader_Setup_{VERSION}.exe"
 
 EXCLUDES = [

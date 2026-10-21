@@ -10,7 +10,7 @@ Windows 11 桌面漫画阅读器 —— **两层书架（书 → 话）**、阅�
 |---|---|---|
 | ![书架](docs/screenshots/01-shelf.jpg) | ![书详情](docs/screenshots/02-book-detail.jpg) | ![阅读器](docs/screenshots/03-reader.jpg) |
 
-| 阅读历史 | 设置 | 桌面伪装（Excel / Word / CMD） | 屏幕边缘小窗 |
+| 阅读历史 | 设置 | 桌面伪装（Excel / Word / CMD） | 边缘迷你阅读器 |
 |---|---|---|---|
 | ![历史](docs/screenshots/04-history.jpg) | ![设置](docs/screenshots/05-settings.jpg) | ![伪装](docs/screenshots/06-camo-excel.jpg) | ![边缘小窗](docs/screenshots/07-edge-panel.png) |
 
@@ -36,7 +36,7 @@ Windows 11 桌面漫画阅读器 —— **两层书架（书 → 话）**、阅�
 | **窗口** | 无边框自绘：拖标题栏移动、四边四角八向缩放、双击最大化、几何位置记忆、可调不透明度 |
 | **全局热键** | 任意界面下隐藏 / 恢复窗口（默认 `Ctrl+\``），托盘图标常驻 |
 | **桌面伪装** | 一键把窗口变成 Excel 表格 / Word 文档 / CMD 终端（自绘假界面 + 假数据），窗口标题同步伪装，可同时从任务栏隐藏 |
-| **屏幕边缘小窗** | 常驻屏幕边缘的迷你窗：鼠标碰边滑出「继续阅读 / 打开书架 / 最近在读」，离开自动收起；支持左/右停靠、封面条(56px)/细缝(8px) 两种收起形态；伪装与全屏时自动隐身 |
+| **边缘迷你阅读器** | 藏在屏幕边缘的隐蔽式小阅读器：平时只是一条 6px 细缝，鼠标碰到屏幕边缘即滑出当前页；**滚轮 / 点左右两侧直接翻页**，进度实时写回书架；鼠标离开自动缩回；双击页面在主窗口打开当前页。支持左/右停靠、细缝(6px)/窄条(40px) 两种形态，伪装与全屏阅读时自动隐身 |
 | **旧数据迁移** | 旧版扁平书架首次启动自动按目录归并成「书」，阅读历史不丢失 |
 
 ## 运行
@@ -52,8 +52,8 @@ Windows 下双击 `启动阅读器.bat`（无控制台窗口），排错时用 `
 
 **方式二：安装包**
 
-下载 `CBZReader_Setup_1.1.0.exe`，双击安装（安装到 `%LOCALAPPDATA%\CBZReader`，无需管理员权限），自动创建桌面与开始菜单快捷方式，可在「设置 → 应用」中卸载。
-便携版 `CBZReader_1.1.0_portable.zip` 解压即用。
+下载 `CBZReader_Setup_1.2.0.exe`，双击安装（安装到 `%LOCALAPPDATA%\CBZReader`，无需管理员权限），自动创建桌面与开始菜单快捷方式，可在「设置 → 应用」中卸载。
+便携版 `CBZReader_1.2.0_portable.zip` 解压即用。
 
 ## 快捷键
 
@@ -81,6 +81,8 @@ Windows 下双击 `启动阅读器.bat`（无控制台窗口），排错时用 `
 
 **窗口**：`Alt+1/2/3` 切换书架 / 历史 / 设置，`Ctrl+F` 搜索，双击标题栏最大化。
 
+**边缘迷你阅读器**：鼠标碰到屏幕边缘自动滑出 → `滚轮` 或点页面左右两侧翻页 → 鼠标离开自动缩回；双击页面在主窗口打开当前页；小窗上右键可切换停靠边 / 细缝或窄条 / 边缘感应。
+
 ## 目录结构
 
 ```
@@ -95,7 +97,7 @@ cbz-reader/
 │   ├── shelf.py            书架页（书的封面墙 + 继续阅读）
 │   ├── book.py             书详情页（各话列表 + 阅读进度）
 │   ├── reader.py           阅读器（自绘滚动 / 单页）
-│   ├── edge.py             屏幕边缘小窗
+│   ├── edge.py             边缘迷你阅读器（贴边隐蔽式小阅读窗）
 │   ├── camo.py             桌面伪装（Excel / Word / CMD 皮肤）
 │   ├── pages.py            历史页 + 设置页
 │   ├── dialogs.py          通用输入对话框
@@ -103,7 +105,7 @@ cbz-reader/
 │   ├── theme.py            配色与 QSS
 │   └── imgutil.py          Pillow → QImage
 ├── tools/
-│   ├── smoke_test.py       无头回归测试（40 项断言）
+│   ├── smoke_test.py       无头回归测试（42 项断言）
 │   ├── render_preview.py   真机截图预览
 │   └── make_icon.py        生成 assets/icon.ico 与 PNG
 ├── packaging/
@@ -139,8 +141,8 @@ python packaging/build.py      # 图标 → PyInstaller → 冻结自检 → 便
 | 文件 | 说明 |
 |---|---|
 | `dist/CBZReader/` | 绿色版程序目录（约 123 MB，含 Qt 运行时） |
-| `dist/CBZReader_1.1.0_portable.zip` | 便携版压缩包（约 51 MB） |
-| `dist/CBZReader_Setup_1.1.0.exe` | 单文件安装包（自带负载，双击即装，无需管理员） |
+| `dist/CBZReader_1.2.0_portable.zip` | 便携版压缩包（约 51 MB） |
+| `dist/CBZReader_Setup_1.2.0.exe` | 单文件安装包（自带负载，双击即装，无需管理员） |
 
 打包流程内置 `CBZReader.exe --selftest` 自检：验证 Pillow/WebP 解码、目录可写、书库读取与封面生成，自检不通过则打包失败。
 

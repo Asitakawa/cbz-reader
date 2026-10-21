@@ -137,13 +137,14 @@ class MainWindow(FramelessWindow):
         ASYNC.sig.import_progress.connect(self._on_import_progress)
         ASYNC.sig.import_done.connect(self._on_import_done)
 
-        # ---------------- 屏幕边缘小窗 ----------------
+        # ---------------- 屏幕边缘迷你阅读器 ----------------
         self.edge = EdgePanel()
-        self.edge.open_book.connect(self.open_chapter)
+        self.edge.open_chapter.connect(self.open_chapter)
+        self.edge.open_in_main.connect(self._open_mini_in_main)
+        self.edge.progress_changed.connect(self._on_edge_progress)
         self.edge.show_main.connect(lambda: self.show_window(0))
         self.edge.state_changed.connect(self._on_edge_state)
-        ASYNC.sig.cover.connect(self.edge.apply_cover)
-        self._sync_edge_content(recent_only=True)
+        self._sync_edge_content()
 
         # ---------------- 伪装层 ----------------
         self.camo = CamoOverlay(self.root)
@@ -176,7 +177,7 @@ class MainWindow(FramelessWindow):
         a_show.triggered.connect(self.toggle_hide)
         a_shelf = tm.addAction("书架")
         a_shelf.triggered.connect(lambda: self.show_window(0))
-        self.a_edge = tm.addAction("屏幕边缘小窗")
+        self.a_edge = tm.addAction("边缘迷你阅读器")
         self.a_edge.setCheckable(True)
         self.a_edge.setChecked(bool(STORE.cfg("edge.enabled", True)))
         self.a_edge.toggled.connect(self._toggle_edge_from_tray)
@@ -387,7 +388,7 @@ class MainWindow(FramelessWindow):
             single = self.reader_page.view.mode == "single"
             if single or pos > 0.85:
                 STORE.mark_finished(self._cur["cid"], True)
-        self.edge.set_progress(idx, total, self._cur.get("name", ""))
+        self.edge.set_progress(idx, total)
         self._save_timer.start()
 
     def _flush_history(self):
@@ -397,7 +398,7 @@ class MainWindow(FramelessWindow):
         cid = self._cur.get("cid", "")
         if self.stack.currentWidget() is self.book_page:
             self.book_page.refresh()
-        self._sync_edge_content(recent_only=True)
+        self._sync_edge_content()
 
     # ================= 导入 =================
     def ask_import_to_book(self, bid: str):
@@ -548,22 +549,33 @@ class MainWindow(FramelessWindow):
                                 QMessageBox.Yes) == QMessageBox.Yes:
             self.start_import(paths)
 
-    # ================= 边缘小窗 =================
+    # ================= 边缘迷你阅读器 =================
     def _sync_edge_content(self, recent_only: bool = False):
-        if not recent_only and self._cur:
-            self.edge.set_book(self._cur["path"], self._cur["name"], self._cur["cid"],
-                               book_title=self._cur.get("title", ""))
-        elif not self._cur:
+        if self._cur:
+            view = self.reader_page.view
+            self.edge.set_chapter(self._cur["path"], self._cur["name"], self._cur["cid"],
+                                  self._cur.get("title", ""), view.current, view.total)
+        else:
             recent = STORE.recent_chapters(1)
             if recent:
                 h = recent[0]
-                self.edge.set_book(h["path"], h["name"], h["key"],
-                                   book_title=h.get("book_title", ""))
-                self.edge.set_progress(int(h.get("page", 0) or 0), int(h.get("total", 0) or 0),
-                                       h["name"])
+                self.edge.set_chapter(h["path"], h["name"], h.get("key", ""),
+                                      h.get("book_title", ""),
+                                      int(h.get("page", 0) or 0),
+                                      int(h.get("total", 0) or 0))
             else:
-                self.edge.set_recent(None)
-        self.edge.set_recent_list(STORE.recent_chapters(3))
+                self.edge.set_chapter("", "", "", "", 0, 0)
+        self.edge.set_recent_list(STORE.recent_chapters(4))
+
+    def _open_mini_in_main(self):
+        cur = self.edge.current_chapter()
+        if cur.get("cid"):
+            self.open_chapter(cur["path"], cur["name"], cur["cid"])
+        else:
+            self.show_window(0)
+
+    def _on_edge_progress(self, cid: str, page: int, total: int):
+        STORE.save_all()
 
     def _sync_edge(self):
         want = (bool(STORE.cfg("edge.enabled", True))

@@ -407,7 +407,7 @@ class SettingsPage(QWidget):
         b4.addWidget(self._hint("按住窗口任意边缘可自由缩放；拖住标题栏任意位置可移动；双击标题栏最大化。"))
 
         # ---- 屏幕边缘小窗 ----
-        _g6, b6 = self._group(lay, "屏幕边缘小窗")
+        _g6, b6 = self._group(lay, "边缘迷你阅读器")
         row = QHBoxLayout()
         row.addWidget(self._lbl("启用"))
         self.chk_edge = QCheckBox()
@@ -429,9 +429,9 @@ class SettingsPage(QWidget):
         row = QHBoxLayout()
         row.addWidget(self._lbl("收起形态"))
         self.cmb_edge_shape = QComboBox()
-        self.cmb_edge_shape.addItem("封面条（56px，显示封面与进度）", "strip")
-        self.cmb_edge_shape.addItem("细缝（8px，最不打扰）", "sliver")
-        self.cmb_edge_shape.setCurrentIndex(0 if STORE.cfg("edge.shape", "strip") == "strip" else 1)
+        self.cmb_edge_shape.addItem("细缝（6px，最隐蔽）", "sliver")
+        self.cmb_edge_shape.addItem("窄条（40px，好点中）", "strip")
+        self.cmb_edge_shape.setCurrentIndex(0 if STORE.cfg("edge.shape", "sliver") == "sliver" else 1)
         self.cmb_edge_shape.currentIndexChanged.connect(
             lambda i: self._emit_edge({"shape": self.cmb_edge_shape.currentData()}))
         row.addWidget(self.cmb_edge_shape)
@@ -445,9 +445,9 @@ class SettingsPage(QWidget):
         row.addStretch(1)
         b6.addLayout(row)
         b6.addWidget(self._hint(
-            "小窗常驻屏幕边缘：鼠标移到边缘自动滑出「继续阅读 / 打开书架」，移开自动收起；"
-            "点封面条可直接续读；在窗口上右键可切换左右停靠与收起形态。"
-            "开启桌面伪装或全屏阅读时会自动隐身。"))
+            "贴在屏幕边缘的隐蔽式小阅读器：平时只是一条细缝，鼠标碰到屏幕边缘即滑出当前页，"
+            "滚轮或点击左右两侧翻页，鼠标离开自动缩回；双击页面在主窗口打开当前页。"
+            "右键可切换左右停靠 / 细缝或窄条 / 边缘感应。开启桌面伪装或全屏阅读时自动隐身。"))
 
         # ---- 库与数据 ----
         _g5, b5 = self._group(lay, "书库与数据")
@@ -593,5 +593,5 @@ class SettingsPage(QWidget):
         self.cmb_edge_side.setCurrentIndex(0 if STORE.cfg("edge.side", "right") == "right" else 1)
         self.cmb_edge_side.blockSignals(False)
         self.cmb_edge_shape.blockSignals(True)
-        self.cmb_edge_shape.setCurrentIndex(0 if STORE.cfg("edge.shape", "strip") == "strip" else 1)
+        self.cmb_edge_shape.setCurrentIndex(0 if STORE.cfg("edge.shape", "sliver") == "sliver" else 1)
         self.cmb_edge_shape.blockSignals(False)

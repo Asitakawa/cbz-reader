@@ -189,36 +189,51 @@ def main() -> int:
         check("复制后的文件可读", src2.page_count == 3, f"{src2.page_count} 页")
         src2.close()
 
-    # ---------- 8. 边缘小窗 ----------
+    # ---------- 8. 边缘迷你阅读器 ----------
     e = win.edge
     scr = e.screen().availableGeometry()
     r_edge = scr.x() + scr.width()
+    e.set_shape("sliver")            # 归一化到细缝，避免受上次运行残留影响
     pump(0.8)
-    check("边缘小窗贴边常驻",
+    check("细缝贴边隐藏",
           e.isVisible() and abs(e.x() + e.width() - r_edge) <= 1
-          and e.width() == e.collapsed_w(), f"x={e.x()} w={e.width()}")
+          and e.width() == 6 and not e.card.isVisible(),
+          f"x={e.x()} w={e.width()}")
+    check("小窗已绑定当前章节", bool(e.current_chapter().get("cid")),
+          e.current_chapter().get("name", ""))
+    e._poll.stop()                       # 测试期间关闭「离开自动收起」，避免光标不在边上
     e.expand()
-    pump(0.6)
-    check("碰边滑出详情", e.expanded and e.width() == 272)
-    check("小窗显示书名", bool(e._book) and bool(e._book.get("book_title")),
-          f"{(e._book or {}).get('book_title')} / {(e._book or {}).get('name')}")
-    check("小窗最近在读列表", e.recent_count() >= 1, f"{e.recent_count()} 条")
-    e.grab().save(str(SHOTS / "14_edge_expanded.png"))
+    pump(1.0)
+    check("碰边滑出阅读窗", e.expanded and e.width() == 420 and e.card.isVisible(),
+          f"w={e.width()}")
+    pump(10, lambda: e._cache.get(e._page) is not None)
+    check("小窗内渲染页面", e.canvas._pm is not None,
+          f"第 {e._page + 1} 页已解码")
+    e.grab().save(str(SHOTS / "14_edge_reader.png"))
+    p0 = e._page
+    e.turn(1)
+    pump(1.0)
+    check("小窗内翻页", e._page == p0 + 1, f"{p0 + 1} → {e._page + 1}")
+    cid_now = e.current_chapter()["cid"]
+    check("翻页写回阅读进度",
+          int((STORE.progress(cid_now) or {}).get("page", -1)) == e._page)
     e.collapse()
-    pump(0.5)
-    check("自动收起", not e.expanded)
+    pump(1.0)
+    check("鼠标离开自动缩回细缝",
+          not e.expanded and e.width() == 6 and not e.card.isVisible(), f"w={e.width()}")
+    e.set_shape("strip")
+    pump(0.6)
+    strip_ok = e.width() == 40
+    e.set_shape("sliver")
+    pump(0.6)
+    check("细缝/窄条切换", strip_ok and e.width() == 6)
     e.set_side("left")
-    pump(0.5)
+    pump(0.6)
     left_ok = abs(e.x() - scr.x()) <= 1
     e.set_side("right")
-    pump(0.5)
+    pump(0.6)
     check("左右停靠", left_ok)
-    e.set_shape("sliver")
-    pump(0.5)
-    sliver_ok = e.width() == 8
-    e.set_shape("strip")
-    pump(0.5)
-    check("细缝/封面条形态", sliver_ok and e.width() == 56)
+    e._poll.start()                      # 恢复自动收起
 
     # ---------- 9. 伪装 / 隐藏 / 全屏 ----------
     skins = ["excel", "word", "term"]

@@ -47,7 +47,7 @@ DEFAULTS = {
     "edge": {
         "enabled": True,
         "side": "right",      # right | left
-        "shape": "strip",     # strip=封面条(56px) | sliver=细缝(8px)
+        "shape": "sliver",    # sliver=细缝(6px) | strip=窄条(40px)
         "auto_peek": True,    # 鼠标碰到屏幕边缘自动滑出
     },
     "camo": {
