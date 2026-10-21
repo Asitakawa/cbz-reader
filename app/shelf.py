@@ -242,7 +242,9 @@ class RecentCard(QFrame):
     def __init__(self, h: dict, parent=None):
         super().__init__(parent)
         self.setObjectName("RecentCard")
-        self.setFixedSize(210, 42)
+        sc = theme.current()["scale"]
+        card_w, card_h = int(212 * sc), int(44 * sc)
+        self.setFixedSize(card_w, card_h)
         self.setCursor(Qt.PointingHandCursor)
         self._cid = h.get("key", "")
         self._path = h.get("path", "")
@@ -257,7 +259,8 @@ class RecentCard(QFrame):
         v.setSpacing(0)
         nm = QLabel()
         nm.setObjectName("RecentName")
-        nm.setText(QFontMetrics(nm.font()).elidedText(self._title, Qt.ElideMiddle, 168))
+        nm.setText(QFontMetrics(nm.font()).elidedText(self._title, Qt.ElideMiddle,
+                                                      card_w - 46))
         total = h.get("total", 0) or 0
         pg = (h.get("page", 0) or 0) + 1
         sub = QLabel(f"{self._name} · {pg}/{total}" if total else self._name)
@@ -350,7 +353,7 @@ class ShelfPage(QWidget):
         rb.addLayout(rhead)
         self.recent_scroll = QScrollArea()
         self.recent_scroll.setWidgetResizable(True)
-        self.recent_scroll.setFixedHeight(52)
+        self.recent_scroll.setFixedHeight(int(56 * theme.current()["scale"]))
         self.recent_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.recent_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.recent_inner = QWidget()
@@ -377,6 +380,12 @@ class ShelfPage(QWidget):
         root.addWidget(self.empty, 1)
 
         ASYNC.sig.cover.connect(self._on_cover)
+        theme.bus.changed.connect(self._on_theme_changed)
+        self.refresh()
+
+    def _on_theme_changed(self):
+        # 字号会影响最近阅读卡高度与书名省略宽度，重建一次即可
+        self.recent_scroll.setFixedHeight(int(56 * theme.current()["scale"]))
         self.refresh()
 
     # ================= 渲染 =================

@@ -183,6 +183,7 @@ class HistoryPage(QWidget):
         root.addWidget(self.empty, 1)
 
         ASYNC.sig.cover.connect(lambda *_: self.refresh() if self.isVisible() else None)
+        theme.bus.changed.connect(self.refresh)
         self.refresh()
 
     def refresh(self):

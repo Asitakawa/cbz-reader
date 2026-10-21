@@ -234,6 +234,12 @@ class BookDetailPage(QWidget):
         self.btn_rename.clicked.connect(lambda: self.rename_requested.emit(self.bid))
         self.btn_cover.clicked.connect(lambda: self.cover_requested.emit(self.bid))
         ASYNC.sig.cover.connect(self._on_cover)
+        theme.bus.changed.connect(self._on_theme_changed)
+
+    def _on_theme_changed(self):
+        # 行内的进度色/状态色是即时写死的，主题切换后重建一次
+        if self.bid:
+            self.refresh()
 
     # ================= 数据 =================
     def load(self, bid: str):
