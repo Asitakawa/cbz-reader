@@ -114,7 +114,7 @@ def main() -> int:
     pump(1.2)
     pump(12, lambda: e._cache.get(e._page) is not None)
     pump(1.0)
-    e._show_bar()
+    e.show_bar()
     pump(0.4)
     e.grab().save(str(OUT / "11_迷你阅读器_滑出.png"))
     e.collapse()

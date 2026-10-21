@@ -12,7 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-VERSION = "2.2.0"
+VERSION = "2.3.0"
 
 
 def bundle_root() -> Path:

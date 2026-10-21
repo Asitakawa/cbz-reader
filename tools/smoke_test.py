@@ -228,12 +228,22 @@ def main() -> int:
     check("小窗已绑定当前章节", bool(e.current_chapter().get("cid")),
           e.current_chapter().get("name", ""))
     e._poll.stop()                       # 测试期间关闭「离开自动收起」，避免光标不在边上
+    STORE.set_cfg("edge.coach_seen", False)     # 首次提示要在测试里稳定复现（需在展开前）
     e.expand()
     pump(1.0)
     check("碰边滑出阅读窗", e.expanded and e.width() == e.peek_w() and e.card.isVisible(),
           f"w={e.width()}")
-    STORE.set_cfg("edge.coach_seen", False)     # 首次提示要在测试里稳定复现
-    check("小窗信息条常驻（不再自动消失）", e.bar.isVisible())
+    check("展开时信息条默认隐藏", not e.bar.isVisible())
+    from PySide6.QtCore import QEvent as _E, QPointF as _P
+    from PySide6.QtGui import QMouseEvent as _M
+    mid = _M(_E.MouseButtonPress, _P(20, 20), Qt.MiddleButton, Qt.MiddleButton,
+             Qt.NoModifier)
+    QApplication.sendEvent(e.canvas, mid)
+    pump(0.3)
+    check("鼠标中键显示信息条", e.bar.isVisible())
+    QApplication.sendEvent(e.canvas, mid)
+    pump(0.3)
+    check("再次中键隐藏信息条", not e.bar.isVisible())
     check("首次展开显示操作提示", e.coach.isVisible())
     e._hide_coach()
     pump(0.2)

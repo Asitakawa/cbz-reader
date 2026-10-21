@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from PySide6.QtCore import (QAbstractAnimation, QEasingCurve, QPoint,
+from PySide6.QtCore import (QAbstractAnimation, QEasingCurve, QEvent, QPoint,
                             QPropertyAnimation, QRect, QSize, Qt, QTimer, Signal)
 from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPixmap
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QListWidget,
@@ -97,6 +97,10 @@ class _Canvas(QWidget):
         e.accept()
 
     def mousePressEvent(self, e):
+        if e.button() == Qt.MiddleButton:
+            self.panel.toggle_bar()      # 中键：显示 / 隐藏底部信息条
+            e.accept()
+            return
         if e.button() == Qt.LeftButton:
             x = e.position().x()
             third = self.width() / 3
@@ -294,6 +298,7 @@ class EdgePanel(QWidget):
         ct = QLabel("这样操作")
         ct.setObjectName("CoachTitle")
         ctext = QLabel("滚轮 / 点页面左右两侧：翻页\n"
+                       "中键：显示 / 隐藏底部信息条\n"
                        "双击页面：回主窗口接着看\n"
                        "「话数」切话 · 「下一话」跳下一话 · 右键更多")
         ctext.setObjectName("CoachText")
@@ -320,6 +325,10 @@ class EdgePanel(QWidget):
         el.addLayout(self.recent_box)
         el.addStretch(1)
         self.empty.hide()
+
+        # 卡片 / 空态 / 提示卡 / 信息条背景上的中键都能切换信息条
+        for w in (self.card, self.empty, self.coach, self.bar):
+            w.installEventFilter(self)
 
         self.btn_chapters.clicked.connect(self._choose_chapter)
         self.btn_next_ch.clicked.connect(self._go_next_chapter)
@@ -404,7 +413,7 @@ class EdgePanel(QWidget):
         w, h = self.width(), self.height()
         self.card.setGeometry(0, 0, w, h)
         self.bar.setGeometry(8, h - BAR_H - 8, w - 16, BAR_H)
-        coach_h = int(104 * theme.current()["scale"])
+        coach_h = int(132 * theme.current()["scale"])
         self.coach.setGeometry(12, max(12, h - BAR_H - 18 - coach_h), w - 24, coach_h)
         self.empty.setGeometry(0, 0, w, h)
 
@@ -495,7 +504,7 @@ class EdgePanel(QWidget):
         self.empty.setVisible(not self._cid)
         self.canvas.setVisible(bool(self._cid))
         self._animate(self._geo_for(self.peek_w()))
-        self._show_bar()
+        self.bar.hide()
         if not bool(STORE.cfg("edge.coach_seen", False)):
             QTimer.singleShot(280, self._show_coach)
         if self._cid:
@@ -634,7 +643,7 @@ class EdgePanel(QWidget):
         STORE.touch_history(cid, ch.get("name", ""), page, total)
         STORE.save_all()
         self.progress_changed.emit(cid, page, total)
-        self._show_bar()
+        self._fit_title()
 
     def _sync_page_label(self):
         self.lbl_page.setText(
@@ -758,25 +767,34 @@ class EdgePanel(QWidget):
             self._animate(QRect(x, y, w, h))
             self.bar.setGeometry(8, h - BAR_H - 8, w - 16, BAR_H)
 
-    # ================= 底部信息条 =================
-    def _show_bar(self):
+    # ================= 底部信息条（中键切换） =================
+    def toggle_bar(self):
         if not self.expanded:
             return
-        self.bar.show()
-        self._layout_children()
+        if self.bar.isVisible():
+            self.bar.hide()
+        else:
+            self.bar.show()
+            self.bar.raise_()
+            self._layout_children()
+            self._sync_page_label()
 
-    def enterEvent(self, e):
-        self._show_bar()
-        super().enterEvent(e)
+    def show_bar(self):
+        """显式显示（截图 / 首次引导用）。"""
+        if self.expanded and not self.bar.isVisible():
+            self.toggle_bar()
+
+    def eventFilter(self, obj, ev):
+        # 卡片 / 空态 / 提示卡 / 信息条背景上的中键也切换信息条
+        if ev.type() == QEvent.MouseButtonPress and ev.button() == Qt.MiddleButton:
+            self.toggle_bar()
+            return True
+        return super().eventFilter(obj, ev)
 
     def leaveEvent(self, e):
         super().leaveEvent(e)
         if self.expanded and not self.pinned:   # 鼠标离开立即缩回，不留延迟
             self.collapse()
-
-    def mouseMoveEvent(self, e):
-        self._show_bar()
-        super().mouseMoveEvent(e)
 
     def _show_coach(self, manual: bool = False):
         if not self.expanded:
@@ -786,7 +804,7 @@ class EdgePanel(QWidget):
         self._layout_children()
         self._coach_timer.start()
         if manual:
-            self._show_bar()
+            self.show_bar()
 
     def _hide_coach(self):
         self._coach_timer.stop()
@@ -823,6 +841,8 @@ class EdgePanel(QWidget):
         a_prev_ch.setEnabled(bool(prv))
         a_next_ch = m.addAction(f"下一话：{nxt.get('name', '')}" if nxt else "下一话")
         a_next_ch.setEnabled(bool(nxt))
+        a_bar = m.addAction("隐藏信息条（中键）" if self.bar.isVisible()
+                            else "显示信息条（中键）")
         m.addSeparator()
         a_open = m.addAction("在主窗口打开当前页")
         a_fold = m.addAction("收起")
@@ -834,7 +854,9 @@ class EdgePanel(QWidget):
         chosen = m.exec(self.mapToGlobal(pos))
         if chosen is None:
             return
-        if chosen == a_prev_ch:
+        if chosen == a_bar:
+            self.toggle_bar()
+        elif chosen == a_prev_ch:
             if prv:
                 self._switch_chapter(prv["id"], to_end=True)
         elif chosen == a_next_ch:
