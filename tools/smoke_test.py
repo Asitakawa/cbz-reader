@@ -200,12 +200,13 @@ def main() -> int:
     scr = e.screen().availableGeometry()
     r_edge = scr.x() + scr.width()
     e.set_shape("sliver")            # 归一化到细缝，避免受上次运行残留影响
+    e.set_side("right")              # 同理，固定停靠边（否则会继承上次的左右设置）
     e.width_target = 420             # 归一化宽度
     pump(0.8)
     check("细缝贴边隐藏",
           e.isVisible() and abs(e.x() + e.width() - r_edge) <= 1
           and e.width() == 6 and not e.card.isVisible(),
-          f"x={e.x()} w={e.width()}")
+          f"x={e.x()} w={e.width()} side={e.side}")
     check("小窗已绑定当前章节", bool(e.current_chapter().get("cid")),
           e.current_chapter().get("name", ""))
     e._poll.stop()                       # 测试期间关闭「离开自动收起」，避免光标不在边上
@@ -229,6 +230,16 @@ def main() -> int:
     e.set_chapters(chs_now, e.current_chapter()["cid"])
     pump(0.3)
     check("小窗有「话」按钮（可切话）", not e.btn_chapters.isHidden(), f"{len(chs_now)} 话")
+    e._choose_chapter()
+    pump(0.4)
+    pk = getattr(e, "_picker", None)
+    if pk is not None:
+        fg = pk.list.item(0).foreground().color().name()
+        check("话数列表文字可见（深色底浅色字）",
+              fg.lower() == "#e8ebf0" and "color:#E8EBF0" in pk.styleSheet(),
+              f"首项前景 {fg} / 共 {pk.list.count()} 项")
+        pk.close()
+        pump(0.2)
     other = next((c for c in chs_now if c["id"] != e.current_chapter()["cid"]), None)
     if other:
         e._switch_chapter(other["id"])
@@ -297,13 +308,16 @@ def main() -> int:
           hidden and edge_hidden and win.isVisible() and e.isVisible())
     STORE.set_cfg("window.close_action", "tray")
     win.close()
-    pump(0.8)
+    pump(0.9)
     closed_hidden = not win.isVisible()
+    edge_alive = e.isVisible()
     win.show_window()
     pump(0.6)
     STORE.set_cfg("window.close_action", "ask")
     check("关闭窗口→最小化到托盘（软件仍在运行）",
           closed_hidden and win.isVisible())
+    check("最小化到托盘不隐藏迷你阅读器", closed_hidden and edge_alive,
+          f"主窗隐藏={closed_hidden} 小窗可见={edge_alive}")
 
     win.toggle_fullscreen()
     pump(0.4)

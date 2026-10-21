@@ -135,6 +135,9 @@ class _ChapterPicker(QWidget):
         for i, ch in enumerate(chapters, 1):
             it = QListWidgetItem(f"{i}. {ch.get('name', '')}")
             it.setData(Qt.UserRole, ch.get("id", ""))
+            # 显式设前景色：全局 QSS 的 QListWidget::item 是浅色主题的深色文字，
+            # 不显式覆盖的话在深色弹窗里会「看不见字」。
+            it.setForeground(QColor("#E8EBF0"))
             self.list.addItem(it)
             if ch.get("id") == current:
                 self.list.setCurrentItem(it)
@@ -142,13 +145,25 @@ class _ChapterPicker(QWidget):
         lay.addWidget(self.list, 1)
         self.list.itemClicked.connect(self._pick)
         self.list.itemActivated.connect(self._pick)
+        # 注意：color / border 必须显式写死，否则会被全局 QListWidget::item 的
+        # 深色文字与浅色下边框继承过来（表现为字看不见 + 每条一道白线）。
         self.setStyleSheet(
             "#PickerCard{background:#15181D;border:1px solid #2A2F38;border-radius:10px;}"
             "#PickerTitle{color:#8B93A1;font-size:10px;}"
-            "#PickerList{background:transparent;color:#E8EBF0;font-size:12px;border:none;}"
-            "#PickerList::item{padding:4px 6px;border-radius:6px;}"
-            "#PickerList::item:selected{background:#2A3550;color:#FFFFFF;}"
-            "#PickerList::item:hover{background:#222833;}")
+            "#PickerList{background:transparent;border:none;outline:none;"
+            "color:#E8EBF0;font-size:12px;}"
+            "#PickerList::item{color:#E8EBF0;background:transparent;border:none;"
+            "padding:5px 7px;border-radius:6px;}"
+            "#PickerList::item:selected{background:#2A3550;color:#FFFFFF;border:none;}"
+            "#PickerList::item:hover{background:#222833;color:#FFFFFF;border:none;}"
+            "#PickerList QScrollBar:vertical{background:#1B1F26;width:8px;"
+            "margin:2px 0 2px 2px;border-radius:4px;}"
+            "#PickerList QScrollBar::handle:vertical{background:#3B4351;"
+            "border-radius:4px;min-height:24px;}"
+            "#PickerList QScrollBar::handle:vertical:hover{background:#4A5464;}"
+            "#PickerList QScrollBar::add-line,#PickerList QScrollBar::sub-line{height:0;}"
+            "#PickerList QScrollBar::add-page,#PickerList QScrollBar::sub-page{"
+            "background:transparent;}")
 
     def _pick(self, item):
         self.picked.emit(item.data(Qt.UserRole))

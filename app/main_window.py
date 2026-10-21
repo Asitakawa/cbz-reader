@@ -579,6 +579,7 @@ class MainWindow(FramelessWindow):
         cur = self.edge.current_chapter()
         if cur.get("cid"):
             self.open_chapter(cur["path"], cur["name"], cur["cid"])
+            self.show_window()          # 主窗口可能已最小化到托盘，这里一并唤回
         else:
             self.show_window(0)
 
@@ -684,7 +685,7 @@ class MainWindow(FramelessWindow):
 
     def toggle_hide(self):
         if self.isVisible() and not self.isMinimized():
-            self.hide_to_tray()        # 主窗口隐藏时，边缘迷你阅读器一起藏起来
+            self.hide_to_tray(with_edge=True)   # 老板键：隐藏时小窗一起藏
         else:
             self.show_window()
 
@@ -732,14 +733,22 @@ class MainWindow(FramelessWindow):
             self.settings_page.refresh()
         return action
 
-    def hide_to_tray(self):
+    def hide_to_tray(self, with_edge: bool = False):
+        """最小化到托盘。
+
+        with_edge=True  —— 老板键 / 标题栏隐藏按钮：连边缘迷你阅读器一起藏起来；
+        with_edge=False —— 关闭窗口 → 最小化到托盘：小窗保留，可以继续在边缘偷看。
+        """
         self._flush_history()
-        self._hidden = True
-        self.edge.collapse()
+        self._hidden = bool(with_edge)
+        if with_edge:
+            self.edge.collapse()
         self.hide()
         self._sync_edge()
         if self.tray.supportsMessages():
-            self.tray.showMessage("CBZ 阅读器", "已最小化到托盘，按 Ctrl+` 或点托盘图标唤回",
+            tip = ("已隐藏，按 Ctrl+` 或点托盘图标唤回" if with_edge
+                   else "已最小化到托盘，边缘迷你阅读器仍在（鼠标碰屏幕边缘可用）")
+            self.tray.showMessage("CBZ 阅读器", tip,
                                   QSystemTrayIcon.Information, 1800)
 
     def quit_app(self):
@@ -812,7 +821,7 @@ class MainWindow(FramelessWindow):
                 return
         if action == "tray":
             e.ignore()
-            self.hide_to_tray()
+            self.hide_to_tray(with_edge=False)   # 关闭到托盘：小窗继续留着
             return
         self._flush_history()
         self.hotkeys.stop()
