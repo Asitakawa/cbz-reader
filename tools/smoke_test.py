@@ -19,7 +19,8 @@ from app.cbr import ComicSource                    # noqa: E402
 from app.main_window import MainWindow             # noqa: E402
 from app.store import CACHE_DIR, DATA_DIR, STORE   # noqa: E402
 from app.tasks import ASYNC                        # noqa: E402
-from app.theme import QSS                          # noqa: E402
+from app import theme as _theme                    # noqa: E402
+from app import theme                              # noqa: E402
 
 DEMO = r"C:\Users\Arelq_\Desktop\各种bat脚本\manga_speace_ccb\O1"
 SHOTS = CACHE_DIR / "_shots"
@@ -72,7 +73,7 @@ def make_test_images() -> Path:
 
 def main() -> int:
     app = QApplication([])
-    app.setStyleSheet(QSS)
+    _theme.init(); _theme.apply()
     win = MainWindow()
     win.show()
     pump(0.6)
@@ -126,6 +127,7 @@ def main() -> int:
     view.set_page(0, animate=False)
     pump(15, lambda: view.pixmap(0) is not None)
     check("打开一话", view.total > 0, f"{pick['name']} · {view.total} 页")
+    check("沉浸阅读（导航栏收起）", not win.rail.isVisible())
     check("页面解码", view.pixmap(0) is not None)
     view.set_fit("width")
     pump(1.0)
@@ -164,7 +166,8 @@ def main() -> int:
           win.book_page.book_title())
     win.book_page.back_requested.emit()
     pump(0.5)
-    check("书详情返回书架", win.stack.currentWidget() is win.shelf_page)
+    check("书详情返回书架", win.stack.currentWidget() is win.shelf_page
+          and win.rail.isVisible())
 
     # ---------- 6. 搜索 / 排序 ----------
     win.shelf_page.search.setText("临时")
@@ -234,9 +237,10 @@ def main() -> int:
     pump(0.4)
     pk = getattr(e, "_picker", None)
     if pk is not None:
-        fg = pk.list.item(0).foreground().color().name()
+        fg = pk.list.item(0).foreground().color().name().upper()
+        want = theme.c("overlay_text").upper()
         check("话数列表文字可见（深色底浅色字）",
-              fg.lower() == "#e8ebf0" and "color:#E8EBF0" in pk.styleSheet(),
+              fg == want and want.lower() in pk.styleSheet().lower(),
               f"首项前景 {fg} / 共 {pk.list.count()} 项")
         pk.close()
         pump(0.2)
@@ -382,6 +386,31 @@ def main() -> int:
     win.grab().save(str(SHOTS / "18_history.png"))
     check("历史页（含书名）", win.history_page.lay.count() > 1)
     win.switch(2)
+    pump(0.8)
+    win.grab().save(str(SHOTS / "20_personalize.png"))
+    pp = win.personalize_page
+    check("个性化页（6 套主题）", len(pp._cards) == 6, f"{len(pp._cards)} 张主题卡")
+    theme.set_theme("ink")
+    pump(0.6)
+    check("切换主题立即生效", theme.current()["theme"] == "ink"
+          and "#16181B" in QApplication.instance().styleSheet(),
+          "墨夜已应用")
+    theme.set_accent("clay")
+    pump(0.5)
+    check("强调色独立于主题", theme.c("accent").upper() == theme.ACCENTS["clay"]["hex"].upper(),
+          theme.c("accent"))
+    theme.set_radius(14)
+    theme.set_scale(1.08)
+    pump(0.5)
+    check("圆角与字号可调", theme.radius_px() == 16 and theme.px(12) == "13px",
+          f"圆角 {theme.radius_px()} / 12px→{theme.px(12)}")
+    check("个性化设置已持久化",
+          STORE.cfg("theme.name") == "ink" and STORE.cfg("theme.accent") == "clay",
+          f"{STORE.cfg('theme.name')} / {STORE.cfg('theme.accent')}")
+    theme.reset()
+    pump(0.5)
+    check("恢复默认外观", theme.current()["theme"] == "paper" and theme.current()["radius"] == 10)
+    win.switch(3)
     pump(0.6)
     win.grab().save(str(SHOTS / "19_settings.png"))
     check("设置页", win.settings_page.cmb_camo.count() == 3)

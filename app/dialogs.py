@@ -22,7 +22,7 @@ class PromptDialog(QDialog):
         lay.setSpacing(10)
 
         lab = QLabel(label)
-        lab.setStyleSheet("color:#1B1E23;font-size:12px;")
+        lab.setObjectName("FormLabel")
         lay.addWidget(lab)
 
         self.edit = QLineEdit(default)
@@ -45,7 +45,7 @@ class PromptDialog(QDialog):
         row.addWidget(ok)
         lay.addLayout(row)
 
-        self.setStyleSheet("QDialog{background:#F4F5F7;}")
+
 
     @staticmethod
     def get_text(parent, title: str, label: str, default: str = "",

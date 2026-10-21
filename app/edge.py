@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QListWidget,
 
 from .store import STORE
 from .tasks import ASYNC
-from .theme import ACCENT
+from . import theme
 
 SLIVER_W = 6         # 细缝（最隐蔽）
 STRIP_W = 40         # 小封面条
@@ -68,14 +68,14 @@ class _Canvas(QWidget):
 
     def paintEvent(self, e):
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor("#0C0E12"))
+        p.fillRect(self.rect(), QColor(theme.c("overlay")))
         if self._scaled is not None and not self._scaled.isNull():
             dpr = self._scaled.devicePixelRatio() or 1.0
             lw, lh = self._scaled.width() / dpr, self._scaled.height() / dpr
             p.drawPixmap(int((self.width() - lw) / 2), int((self.height() - lh) / 2),
                          self._scaled)
         elif self._hint:
-            p.setPen(QColor("#7C838F"))
+            p.setPen(QColor(theme.c("overlay_sub")))
             f = p.font()
             f.setPointSize(10)
             p.setFont(f)
@@ -106,6 +106,35 @@ class _Canvas(QWidget):
     def mouseDoubleClickEvent(self, e):
         self.dbl.emit()
         e.accept()
+
+
+def _picker_qss() -> str:
+    """话数弹窗的深色浮层样式：文字/描边显式写死，避免被浅色主题的全局规则污染。"""
+    return (
+        "#PickerCard{background:%(bg)s;border:1px solid %(line)s;"
+        "border-radius:%(r)s;}"
+        "#PickerTitle{color:%(sub)s;font-size:%(f10)s;}"
+        "#PickerList{background:transparent;border:none;outline:none;"
+        "color:%(text)s;font-size:%(f12)s;}"
+        "#PickerList::item{color:%(text)s;background:transparent;border:none;"
+        "padding:5px 7px;border-radius:%(r1)s;}"
+        "#PickerList::item:selected{background:%(soft)s;color:%(text)s;border:none;}"
+        "#PickerList::item:hover{background:%(hover)s;color:%(text)s;border:none;}"
+        "#PickerList QScrollBar:vertical{background:%(bg)s;width:8px;"
+        "margin:2px 0 2px 2px;border-radius:4px;}"
+        "#PickerList QScrollBar::handle:vertical{background:%(line)s;"
+        "border-radius:4px;min-height:24px;}"
+        "#PickerList QScrollBar::handle:vertical:hover{background:%(sub)s;}"
+        "#PickerList QScrollBar::add-line,#PickerList QScrollBar::sub-line{height:0;}"
+        "#PickerList QScrollBar::add-page,#PickerList QScrollBar::sub-page{"
+        "background:transparent;}"
+    ) % {
+        "bg": theme.c("overlay"), "line": theme.c("overlay_line"),
+        "sub": theme.c("overlay_sub"), "text": theme.c("overlay_text"),
+        "soft": theme.mix(theme.c("overlay"), theme.c("accent"), 0.30),
+        "hover": theme.c("overlay2"), "r": theme.c("r3"),
+        "r1": theme.c("r1"), "f10": theme.px(10), "f12": theme.px(12),
+    }
 
 
 class _ChapterPicker(QWidget):
@@ -145,25 +174,14 @@ class _ChapterPicker(QWidget):
         lay.addWidget(self.list, 1)
         self.list.itemClicked.connect(self._pick)
         self.list.itemActivated.connect(self._pick)
-        # 注意：color / border 必须显式写死，否则会被全局 QListWidget::item 的
-        # 深色文字与浅色下边框继承过来（表现为字看不见 + 每条一道白线）。
-        self.setStyleSheet(
-            "#PickerCard{background:#15181D;border:1px solid #2A2F38;border-radius:10px;}"
-            "#PickerTitle{color:#8B93A1;font-size:10px;}"
-            "#PickerList{background:transparent;border:none;outline:none;"
-            "color:#E8EBF0;font-size:12px;}"
-            "#PickerList::item{color:#E8EBF0;background:transparent;border:none;"
-            "padding:5px 7px;border-radius:6px;}"
-            "#PickerList::item:selected{background:#2A3550;color:#FFFFFF;border:none;}"
-            "#PickerList::item:hover{background:#222833;color:#FFFFFF;border:none;}"
-            "#PickerList QScrollBar:vertical{background:#1B1F26;width:8px;"
-            "margin:2px 0 2px 2px;border-radius:4px;}"
-            "#PickerList QScrollBar::handle:vertical{background:#3B4351;"
-            "border-radius:4px;min-height:24px;}"
-            "#PickerList QScrollBar::handle:vertical:hover{background:#4A5464;}"
-            "#PickerList QScrollBar::add-line,#PickerList QScrollBar::sub-line{height:0;}"
-            "#PickerList QScrollBar::add-page,#PickerList QScrollBar::sub-page{"
-            "background:transparent;}")
+        self.setStyleSheet(_picker_qss())
+        self._apply_item_colors()
+
+    def _apply_item_colors(self):
+        # 显式设前景色：全局 QSS 的 QListWidget::item 是浅色主题的深色文字，
+        # 不覆盖的话在深色弹窗里会「看不见字」。
+        for i in range(self.list.count()):
+            self.list.item(i).setForeground(QColor(theme.c("overlay_text")))
 
     def _pick(self, item):
         self.picked.emit(item.data(Qt.UserRole))
@@ -227,9 +245,10 @@ class EdgePanel(QWidget):
         bl.setContentsMargins(10, 5, 8, 5)
         bl.setSpacing(8)
         self.lbl_title = QLabel("")
-        self.lbl_title.setStyleSheet("color:#EDEFF3;font-size:11px;font-weight:600;")
+        theme.style(self.lbl_title,
+                    "color:$overlay_text;font-size:$f11;font-weight:600;")
         self.lbl_page = QLabel("0 / 0")
-        self.lbl_page.setStyleSheet("color:#B9C0CC;font-size:11px;")
+        theme.style(self.lbl_page, "color:$overlay_sub;font-size:$f11;")
         self.btn_chapters = QPushButton("话数")
         self.btn_prev = QPushButton("‹")
         self.btn_next = QPushButton("›")
@@ -257,7 +276,7 @@ class EdgePanel(QWidget):
         el.setContentsMargins(16, 16, 16, 16)
         el.setSpacing(6)
         t = QLabel("还没有正在读的漫画")
-        t.setStyleSheet("color:#C9CFDA;font-size:12px;font-weight:600;")
+        theme.style(t, "color:$overlay_text;font-size:$f12;font-weight:600;")
         el.addWidget(t)
         self.recent_box = QVBoxLayout()
         self.recent_box.setSpacing(2)
@@ -289,6 +308,7 @@ class EdgePanel(QWidget):
         self._bar_timer.timeout.connect(self._hide_bar)
 
         self._apply_style()
+        theme.bus.changed.connect(self._apply_style)
         self.resize(self.collapsed_w(), self.peek_h())
 
     # ================= 宽度 / 几何 =================
@@ -352,27 +372,41 @@ class EdgePanel(QWidget):
             return
         p = QPainter(self)
         w, h = self.width(), self.height()
-        p.fillRect(self.rect(), QColor("#14171C"))
+        p.fillRect(self.rect(), QColor(theme.c("overlay")))
         edge_x = w - 3 if self.side == "right" else 0
-        p.fillRect(QRect(edge_x, 0, 3, h), QColor("#2F3540"))
+        p.fillRect(QRect(edge_x, 0, 3, h), QColor(theme.c("overlay_line")))
         mid = h // 2
-        p.fillRect(QRect(edge_x, mid - 34, 3, 68), QColor(ACCENT))
+        p.fillRect(QRect(edge_x, mid - 34, 3, 68), QColor(theme.c("accent")))
         if self.shape == "strip":
             # 窄条形态：画一条竖向进度
             ratio = (self._page + 1) / self._total if self._total else 0
             bh = int((h - 40) * min(1.0, ratio))
-            p.fillRect(QRect(edge_x, h - 20 - bh, 3, bh), QColor("#2E9E5B"))
+            p.fillRect(QRect(edge_x, h - 20 - bh, 3, bh), QColor(theme.c("ok")))
         p.end()
 
     def _apply_style(self):
+        r = theme.radius_px() + 2
         self.setStyleSheet(
-            "#MiniCard{background:#0C0E12;border-radius:%dpx;"
-            "border:1px solid #23272F;}"
-            "#MiniBar{background:rgba(18,22,28,215);border-radius:8px;}"
-            "#MiniBtn{background:rgba(255,255,255,26);color:#E8EBF0;"
-            "border:none;border-radius:6px;font-size:11px;padding:0 7px;}"
-            "#MiniBtn:hover{background:rgba(255,255,255,52);}"
-            % RADIUS)
+            "#MiniCard{background:%(bg)s;border-radius:%(r)dpx;"
+            "border:1px solid %(line)s;}"
+            "#MiniBar{background:%(bar)s;border:1px solid %(line)s;"
+            "border-radius:%(r2)s;}"
+            "#MiniBtn{background:%(btn)s;color:%(text)s;"
+            "border:none;border-radius:%(r1)s;font-size:%(f11)s;padding:0 7px;}"
+            "#MiniBtn:hover{background:%(btn2)s;}"
+            "#MiniBtnLeft{background:%(btn)s;color:%(sub)s;border:none;"
+            "border-radius:%(r1)s;font-size:%(f10)s;text-align:left;padding:0 8px;}"
+            "#MiniBtnLeft:hover{background:%(btn2)s;color:%(text)s;}"
+            % {
+                "bg": theme.c("overlay"), "line": theme.c("overlay_line"),
+                "bar": theme.mix(theme.c("overlay"), "#000000", 0.18),
+                "btn": theme.mix(theme.c("overlay"), "#FFFFFF", 0.09),
+                "btn2": theme.mix(theme.c("overlay"), "#FFFFFF", 0.18),
+                "text": theme.c("overlay_text"), "sub": theme.c("overlay_sub"),
+                "r": r, "r1": theme.c("r1"), "r2": theme.c("r2"),
+                "f10": theme.px(10), "f11": theme.px(11),
+            })
+        self.update()
 
     # ================= 显示 / 挂起 =================
     def start(self):
@@ -725,13 +759,9 @@ class EdgePanel(QWidget):
             book = h.get("book_title", "")
             label = f"{book} · {h.get('name', '')}" if book else h.get("name", "")
             b = QPushButton(f"{label[:20]}   {pos}")
-            b.setObjectName("MiniBtn")
+            b.setObjectName("MiniBtnLeft")
             b.setCursor(Qt.PointingHandCursor)
             b.setFixedHeight(28)
-            b.setStyleSheet(
-                "#MiniBtn{background:rgba(255,255,255,18);color:#DDE2EA;border:none;"
-                "border-radius:6px;font-size:11px;text-align:left;padding:0 8px;}"
-                "#MiniBtn:hover{background:rgba(255,255,255,42);}")
             b.clicked.connect(lambda _=False, p=h.get("path", ""), n=h.get("name", ""),
                               k=h.get("key", ""): self._open_recent(p, n, k))
             self.recent_box.addWidget(b)

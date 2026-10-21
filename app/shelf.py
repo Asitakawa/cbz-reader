@@ -6,15 +6,17 @@ import subprocess
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, QRect, QSize, Qt, Signal
-from PySide6.QtGui import QAction, QColor, QFont, QFontMetrics, QPainter, QPixmap
+from PySide6.QtGui import (QAction, QColor, QFont, QFontMetrics, QPainter,
+                           QPen, QPixmap)
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit,
                                QMenu, QPushButton, QScrollArea, QVBoxLayout,
                                QWidget)
 
 from .cbr import natkey
+from .imgutil import cover_pixmap
 from .store import BOOKCOVER_DIR, COVER_DIR, STORE
 from .tasks import ASYNC
-from .theme import ACCENT
+from . import theme
 
 TILE_W, COVER_W, COVER_H = 154, 146, 204
 
@@ -106,28 +108,26 @@ class BookTile(QFrame):
         lay.setSpacing(6)
 
         self.cover = QLabel()
+        self.cover.setObjectName("CoverBox")
         self.cover.setFixedSize(COVER_W, COVER_H)
         self.cover.setAlignment(Qt.AlignCenter)
-        self.cover.setStyleSheet(
-            "background:#E9ECF0;border-radius:8px;color:#9AA2AC;font-size:11px;")
         lay.addWidget(self.cover, 0, Qt.AlignHCenter)
 
         self.badge = QLabel(self.cover)
-        self.badge.setStyleSheet("background:rgba(59,111,224,225);color:white;border-radius:6px;"
-                                 "padding:1px 6px;font-size:10px;font-weight:600;")
+        self.badge.setAttribute(Qt.WA_StyledBackground, True)
+        theme.style(self.badge,
+                    "background:$accent;color:$accent_text;border-radius:$r1;"
+                    "padding:1px 6px;font-size:$f10;font-weight:600;")
         self.badge.hide()
 
         self.lbl = QLabel()
         self.lbl.setObjectName("TileMeta")
         self.lbl.setFixedWidth(COVER_W)
-        f = QFont()
-        f.setPointSize(9)
-        self.lbl.setFont(f)
         lay.addWidget(self.lbl)
 
         bar = QFrame()
         bar.setFixedSize(COVER_W, 4)
-        bar.setStyleSheet("background:#E3E6EA;border-radius:2px;")
+        theme.style(bar, "background:$border;border-radius:2px;")
         self.bar_in = QFrame(bar)
         self.bar_in.setGeometry(0, 0, 0, 4)
         lay.addWidget(bar, 0, Qt.AlignHCenter)
@@ -150,8 +150,8 @@ class BookTile(QFrame):
             self.cover.setText("空书\n点此导入")
         else:
             self.bar_in.setFixedWidth(max(2, int(COVER_W * st["ratio"])))
-            self.bar_in.setStyleSheet(
-                f"background:{'#2E9E5B' if st['ratio'] >= 1 else ACCENT};border-radius:2px;")
+            theme.now(self.bar_in, "background:%s;border-radius:2px;"
+                      % theme.c("ok" if st["ratio"] >= 1 else "accent"))
             txt = f"已读完 {st['finished']}/{n}" if st["finished"] else f"{n} 话"
             self.badge.setText(txt)
             self.badge.show()
@@ -190,8 +190,9 @@ class BookTile(QFrame):
 
     def _set_pixmap(self, pm: QPixmap):
         self.cover.setText("")
-        self.cover.setPixmap(pm.scaled(COVER_W, COVER_H, Qt.KeepAspectRatio,
-                                       Qt.SmoothTransformation))
+        self.cover.setPixmap(cover_pixmap(pm, COVER_W, COVER_H,
+                                          theme.radius_px(),
+                                          self.devicePixelRatioF()))
         self.badge.adjustSize()
         self.badge.move(COVER_W - self.badge.width() - 6, 6)
 
@@ -217,9 +218,12 @@ class BookTile(QFrame):
         super().paintEvent(e)
         if self._hover:
             p = QPainter(self)
-            p.setPen(QColor(ACCENT))
+            pen = QPen(QColor(theme.c("accent")))
+            pen.setWidth(2)
+            p.setPen(pen)
             p.setBrush(Qt.NoBrush)
-            p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 10, 10)
+            r = theme.radius_px() + 2
+            p.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), r, r)
             p.end()
 
     def mousePressEvent(self, e):
@@ -260,11 +264,11 @@ class RecentCard(QFrame):
         sub.setObjectName("RecentSub")
         v.addWidget(nm)
         v.addWidget(sub)
-        cl.addLayout(v, 1)
         bar = QFrame()
         bar.setFixedWidth(4)
-        bar.setStyleSheet(f"background:{ACCENT};border-radius:2px;")
-        cl.addWidget(bar)
+        theme.now(bar, "background:$accent;border-radius:2px;")
+        cl.insertWidget(0, bar)
+        cl.addLayout(v, 1)
         self.setToolTip(f"{self._title} · {self._name}\n{self._path}")
 
     def mouseReleaseEvent(self, e):
@@ -337,7 +341,7 @@ class ShelfPage(QWidget):
         rb.setSpacing(6)
         rhead = QHBoxLayout()
         t = QLabel("继续阅读")
-        t.setStyleSheet("color:#1B1E23;font-size:12px;font-weight:700;")
+        t.setObjectName("CardTitle")
         rhead.addWidget(t)
         rhead.addStretch(1)
         self.lbl_recent_hint = QLabel("")
@@ -369,7 +373,7 @@ class ShelfPage(QWidget):
         self.empty = QLabel("书架还是空的\n点右上角「＋ 新增书」建一本书，再往书里导入各话；\n"
                             "也可以直接把 .cbz 或图片文件夹拖进窗口")
         self.empty.setAlignment(Qt.AlignCenter)
-        self.empty.setStyleSheet("color:#9AA2AC;font-size:13px;line-height:180%;")
+        self.empty.setObjectName("EmptyState")
         root.addWidget(self.empty, 1)
 
         ASYNC.sig.cover.connect(self._on_cover)

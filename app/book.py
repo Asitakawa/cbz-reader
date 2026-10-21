@@ -10,9 +10,10 @@ from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
                                QScrollArea, QVBoxLayout, QWidget)
 
 from .cbr import natkey
+from .imgutil import cover_pixmap
 from .store import BOOKCOVER_DIR, COVER_DIR, STORE
 from .tasks import ASYNC
-from .theme import ACCENT
+from . import theme
 
 COVER_W, COVER_H = 104, 146
 
@@ -53,12 +54,12 @@ class ChapterRow(QFrame):
         self.no = QLabel(str(index))
         self.no.setFixedWidth(34)
         self.no.setAlignment(Qt.AlignCenter)
-        self.no.setStyleSheet("color:#8B93A1;font-size:12px;font-weight:600;")
+        theme.style(self.no, "color:$sub;font-size:$f12;font-weight:600;")
         lay.addWidget(self.no)
 
         self.thumb = QLabel()
         self.thumb.setFixedSize(30, 42)
-        self.thumb.setStyleSheet("background:#E9ECF0;border-radius:4px;")
+        self.thumb.setObjectName("CoverBox")
         self.thumb.setAlignment(Qt.AlignCenter)
         lay.addWidget(self.thumb)
 
@@ -66,7 +67,7 @@ class ChapterRow(QFrame):
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(3)
         name = QLabel()
-        name.setStyleSheet("color:#1B1E23;font-size:12px;font-weight:600;")
+        name.setObjectName("CardTitle")
         fm = QFontMetrics(name.font())
         kind = "文件夹" if ch.get("kind") == "dir" else "压缩包"
         name.setText(fm.elidedText(ch["name"], Qt.ElideMiddle, 320))
@@ -85,19 +86,19 @@ class ChapterRow(QFrame):
         # 进度条
         bar_host = QFrame()
         bar_host.setFixedSize(120, 6)
-        bar_host.setStyleSheet("background:#E3E6EA;border-radius:3px;")
+        theme.style(bar_host, "background:$border;border-radius:3px;")
         self.bar = QFrame(bar_host)
         ratio = 0.0 if not total else min(1.0, page / total)
         self.bar.setGeometry(0, 0, int(120 * ratio), 6)
-        color = "#2E9E5B" if h.get("finished") else ACCENT
-        self.bar.setStyleSheet(f"background:{color};border-radius:3px;")
+        theme.now(self.bar, "background:%s;border-radius:3px;"
+                  % theme.c("ok" if h.get("finished") else "accent"))
         lay.addWidget(bar_host)
 
         self.state = QLabel("已读完" if h.get("finished") else (f"{int(ratio*100)}%" if total else ""))
         self.state.setFixedWidth(48)
         self.state.setAlignment(Qt.AlignCenter)
-        self.state.setStyleSheet(
-            f"color:{'#2E9E5B' if h.get('finished') else '#8B93A1'};font-size:11px;")
+        theme.now(self.state, "color:%s;font-size:%s;"
+                  % (theme.c("ok" if h.get("finished") else "sub"), theme.px(11)))
         lay.addWidget(self.state)
 
         self._load_thumb()
@@ -105,7 +106,8 @@ class ChapterRow(QFrame):
     def _load_thumb(self):
         c = COVER_DIR / f"{self.cid}_420.jpg"
         if c.exists():
-            pm = QPixmap(str(c)).scaled(30, 42, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            pm = cover_pixmap(QPixmap(str(c)), 30, 42, theme.radius_px() - 3,
+                              self.devicePixelRatioF())
             self.thumb.setPixmap(pm)
         else:
             self.thumb.setText("📄")
@@ -115,7 +117,8 @@ class ChapterRow(QFrame):
         pm = QPixmap(path)
         if not pm.isNull():
             self.thumb.setText("")
-            self.thumb.setPixmap(pm.scaled(30, 42, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            self.thumb.setPixmap(cover_pixmap(pm, 30, 42, theme.radius_px() - 3,
+                                              self.devicePixelRatioF()))
 
     def mouseReleaseEvent(self, e):
         if e.button() == Qt.LeftButton:
@@ -140,6 +143,7 @@ class BookDetailPage(QWidget):
         super().__init__()
         self.setObjectName("Page")
         self.bid = ""
+        self._title = ""
         self._rows: dict[str, ChapterRow] = {}
         self._chapter_order: list[str] = []
 
@@ -177,7 +181,7 @@ class BookDetailPage(QWidget):
         self.cover = QLabel()
         self.cover.setFixedSize(COVER_W, COVER_H)
         self.cover.setAlignment(Qt.AlignCenter)
-        self.cover.setStyleSheet("background:#E9ECF0;border-radius:8px;color:#9AA2AC;font-size:11px;")
+        self.cover.setObjectName("CoverBox")
         self.cover.setCursor(Qt.PointingHandCursor)
         self.cover.setToolTip("点击设置封面")
         self.cover.mouseReleaseEvent = lambda e: self.cover_requested.emit(self.bid) \
@@ -188,7 +192,7 @@ class BookDetailPage(QWidget):
         info.setContentsMargins(0, 0, 0, 0)
         info.setSpacing(6)
         self.lbl_title = QLabel("")
-        self.lbl_title.setStyleSheet("color:#1B1E23;font-size:19px;font-weight:700;")
+        self.lbl_title.setObjectName("BookTitle")
         self.lbl_meta = QLabel("")
         self.lbl_meta.setObjectName("Muted")
         self.lbl_path = QLabel("")
@@ -196,10 +200,11 @@ class BookDetailPage(QWidget):
         self.lbl_path.setWordWrap(True)
         self.pbar_host = QFrame()
         self.pbar_host.setFixedHeight(6)
-        self.pbar_host.setStyleSheet("background:#E3E6EA;border-radius:3px;")
+        self.pbar_host.setMaximumWidth(240)
+        theme.style(self.pbar_host, "background:$border;border-radius:3px;")
         self.pbar = QFrame(self.pbar_host)
         self.pbar.setGeometry(0, 0, 0, 6)
-        self.pbar.setStyleSheet(f"background:{ACCENT};border-radius:3px;")
+        theme.style(self.pbar, "background:$accent;border-radius:3px;")
         info.addWidget(self.lbl_title)
         info.addWidget(self.lbl_meta)
         info.addWidget(self.pbar_host)
@@ -221,7 +226,7 @@ class BookDetailPage(QWidget):
 
         self.empty = QLabel("这本书还没有内容\n点右上角「＋ 导入话数」，或把 .cbz / 图片文件夹拖进来")
         self.empty.setAlignment(Qt.AlignCenter)
-        self.empty.setStyleSheet("color:#9AA2AC;font-size:13px;line-height:180%;")
+        self.empty.setObjectName("EmptyState")
         root.addWidget(self.empty, 1)
 
         self.btn_resume.clicked.connect(self._resume)
@@ -243,7 +248,9 @@ class BookDetailPage(QWidget):
         if not b:
             return
         st = STORE.book_stats(self.bid)
-        self.lbl_title.setText(b["title"])
+        self._title = b["title"]
+        self.lbl_title.setToolTip(b["title"])
+        self._fit_title()
         self.lbl_meta.setText(
             f"共 {st['chapters']} 话 · 已读完 {st['finished']} 话 · "
             f"阅读 {st['times']} 次 · 最近 {fmt_time(st['last_time'])}")
@@ -284,8 +291,9 @@ class BookDetailPage(QWidget):
                 pm = QPixmap(p)
                 if not pm.isNull():
                     self.cover.setText("")
-                    self.cover.setPixmap(pm.scaled(COVER_W, COVER_H, Qt.KeepAspectRatio,
-                                                   Qt.SmoothTransformation))
+                    self.cover.setPixmap(cover_pixmap(pm, COVER_W, COVER_H,
+                                                      theme.radius_px(),
+                                                      self.devicePixelRatioF()))
                     return
         self.cover.setPixmap(QPixmap())
         self.cover.setText("点此设置封面")
@@ -394,10 +402,19 @@ class BookDetailPage(QWidget):
         self.refresh()
         self.changed.emit()
 
+    def _fit_title(self):
+        """书名超长时省略，避免把信息区挤成一行超长文本。"""
+        if not self._title:
+            return
+        avail = max(240, (self.card.width() or self.width()) - COVER_W - 80)
+        fm = QFontMetrics(self.lbl_title.font())
+        self.lbl_title.setText(fm.elidedText(self._title, Qt.ElideRight, avail))
+
     def resizeEvent(self, e):
         st = STORE.book_stats(self.bid) if self.bid else {"ratio": 0}
         n = st.get("chapters", 0)
         self.pbar.setGeometry(0, 0, int(self.pbar_host.width() * st.get("ratio", 0)) if n else 0, 6)
+        self._fit_title()
         super().resizeEvent(e)
 
 

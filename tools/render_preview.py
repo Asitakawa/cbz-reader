@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QApplication          # noqa: E402
 from app.main_window import MainWindow              # noqa: E402
 from app.store import CACHE_DIR, STORE              # noqa: E402
 from app.tasks import ASYNC                         # noqa: E402
-from app.theme import QSS                           # noqa: E402
+from app import theme as _theme                    # noqa: E402
 
 OUT = CACHE_DIR / "_preview"
 OUT.mkdir(parents=True, exist_ok=True)
@@ -33,7 +33,7 @@ def pump(seconds: float, cond=None):
 
 def main() -> int:
     app = QApplication([])
-    app.setStyleSheet(QSS)
+    _theme.init(); _theme.apply()
     win = MainWindow()
     win.resize(1280, 812)
     win.show()
@@ -82,6 +82,9 @@ def main() -> int:
     pump(1.5)
     win.grab().save(str(OUT / "05_历史记录.png"))
     win.switch(2)
+    pump(1.0)
+    win.grab().save(str(OUT / "12_个性化.png"))
+    win.switch(3)
     pump(0.8)
     win.grab().save(str(OUT / "06_设置.png"))
 
@@ -106,6 +109,7 @@ def main() -> int:
     pump(0.5)
     e.grab().save(str(OUT / "10_迷你阅读器_细缝.png"))
     e._poll.stop()
+    e.pin(True)          # 截图期间钉住，否则鼠标不在窗内会立即缩回
     e.expand()
     pump(1.2)
     pump(12, lambda: e._cache.get(e._page) is not None)
@@ -114,8 +118,23 @@ def main() -> int:
     pump(0.4)
     e.grab().save(str(OUT / "11_迷你阅读器_滑出.png"))
     e.collapse()
+    e.pin(False)
     pump(0.6)
     e._poll.start()
+
+    # 7. 深色主题对照
+    _theme.set_theme("ink")
+    pump(1.2)
+    win.switch(0)
+    pump(1.0)
+    win.grab().save(str(OUT / "13_书架_墨夜.png"))
+    win.open_book_detail(target["id"])
+    pump(1.2)
+    win.grab().save(str(OUT / "14_书详情_墨夜.png"))
+    _theme.set_theme("paper")
+    pump(1.0)
+    win.switch(0)
+    pump(0.6)
 
     STORE.save_all()
     win.hotkeys.stop()

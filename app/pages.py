@@ -14,9 +14,11 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFrame,
                                QVBoxLayout, QWidget)
 
 from .hotkey import parse_hotkey
+from .imgutil import cover_pixmap
+from .window import Selector, Toggle
 from .store import APP_DIR, DATA_DIR, STORE
 from .tasks import ASYNC
-from .theme import ACCENT
+from . import theme
 
 
 def _nz(state) -> bool:
@@ -75,16 +77,17 @@ class HistoryRow(QFrame):
 
         self.thumb = QLabel()
         self.thumb.setFixedSize(40, 56)
-        self.thumb.setStyleSheet("background:#E9ECF0;border-radius:5px;")
+        self.thumb.setObjectName("CoverBox")
         self.thumb.setAlignment(Qt.AlignCenter)
         lay.addWidget(self.thumb)
         self._load_thumb()
 
-        v = QVBoxLayout()
+        info = QWidget()
+        v = QVBoxLayout(info)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(3)
         name = QLabel()
-        name.setStyleSheet("color:#1B1E23;font-size:12px;font-weight:600;")
+        name.setObjectName("CardTitle")
         fm = QFontMetrics(name.font())
         label = f"{h.get('book_title')} · {self._name}" if h.get("book_title") else self._name
         name.setText(fm.elidedText(label, Qt.ElideMiddle, 400))
@@ -96,22 +99,24 @@ class HistoryRow(QFrame):
         sub.setObjectName("Muted")
         bar = QFrame()
         bar.setFixedHeight(4)
-        bar.setStyleSheet("background:#E3E6EA;border-radius:2px;")
+        theme.style(bar, "background:$border;border-radius:2px;")
         bin_ = QFrame(bar)
-        bin_.setGeometry(0, 0, int(600 * ratio), 4)
-        bin_.setStyleSheet(f"background:{ACCENT};border-radius:2px;")
-        bar.setFixedWidth(600)
+        bin_.setGeometry(0, 0, int(240 * ratio), 4)
+        theme.now(bin_, "background:$accent;border-radius:2px;")
+        bar.setFixedWidth(240)
         v.addWidget(name)
         v.addWidget(sub)
         v.addWidget(bar)
-        lay.addLayout(v, 1)
+        lay.addWidget(info, 1)
 
         b1 = QPushButton("继续阅读")
         b1.setObjectName("Primary")
+        b1.setFixedWidth(100)
         b1.setCursor(Qt.PointingHandCursor)
         b1.clicked.connect(lambda: self.resume.emit(self._path, self._name, self._key))
         b2 = QPushButton("移除记录")
         b2.setObjectName("Ghost")
+        b2.setFixedWidth(94)
         b2.setCursor(Qt.PointingHandCursor)
         b2.clicked.connect(lambda: self.remove.emit(self._key))
         lay.addWidget(b1)
@@ -121,7 +126,8 @@ class HistoryRow(QFrame):
         from .store import COVER_DIR
         c = COVER_DIR / f"{self._key}_420.jpg"
         if c.exists():
-            pm = QPixmap(str(c)).scaled(40, 56, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            pm = cover_pixmap(QPixmap(str(c)), 40, 56, theme.radius_px() - 2,
+                              self.devicePixelRatioF())
             self.thumb.setPixmap(pm)
         else:
             self.thumb.setText("📕")
@@ -173,7 +179,7 @@ class HistoryPage(QWidget):
 
         self.empty = QLabel("还没有阅读记录 —— 打开一本书就会自动记录进度")
         self.empty.setAlignment(Qt.AlignCenter)
-        self.empty.setStyleSheet("color:#9AA2AC;font-size:13px;")
+        self.empty.setObjectName("EmptyState")
         root.addWidget(self.empty, 1)
 
         ASYNC.sig.cover.connect(lambda *_: self.refresh() if self.isVisible() else None)
@@ -289,9 +295,16 @@ class SettingsPage(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(18, 12, 18, 12)
         outer.setSpacing(10)
+        head = QVBoxLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        head.setSpacing(1)
         t = QLabel("设置")
         t.setObjectName("SectionTitle")
-        outer.addWidget(t)
+        sub = QLabel("外观（主题 / 强调色 / 圆角 / 字号）在左侧「个性化」页，这里管功能与行为")
+        sub.setObjectName("PageSub")
+        head.addWidget(t)
+        head.addWidget(sub)
+        outer.addLayout(head)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -330,7 +343,7 @@ class SettingsPage(QWidget):
         _g2, b2 = self._group(lay, "阅读默认")
         row = QHBoxLayout()
         row.addWidget(self._lbl("默认阅读方向"))
-        self.cmb_dir = QComboBox()
+        self.cmb_dir = Selector()
         self.cmb_dir.addItems(["从左到右", "从右到左（日漫）"])
         self.cmb_dir.setCurrentIndex(1 if STORE.cfg("reader.rtl") else 0)
         self.cmb_dir.currentIndexChanged.connect(
@@ -338,7 +351,7 @@ class SettingsPage(QWidget):
         row.addWidget(self.cmb_dir)
         row.addSpacing(20)
         row.addWidget(self._lbl("默认模式"))
-        self.cmb_mode = QComboBox()
+        self.cmb_mode = Selector()
         self.cmb_mode.addItems(["连续滚动", "单页翻页"])
         self.cmb_mode.setCurrentIndex(0 if STORE.cfg("reader.mode") == "scroll" else 1)
         self.cmb_mode.currentIndexChanged.connect(
@@ -349,7 +362,7 @@ class SettingsPage(QWidget):
 
         row = QHBoxLayout()
         row.addWidget(self._lbl("阅读背景"))
-        self.cmb_bg = QComboBox()
+        self.cmb_bg = Selector()
         for name, color in (("深灰（默认）", "#101216"), ("纯黑", "#000000"),
                             ("墨蓝", "#0E1420"), ("暖白", "#F2EFE9"), ("米黄", "#EFE6D0")):
             self.cmb_bg.addItem(name, color)
@@ -360,7 +373,7 @@ class SettingsPage(QWidget):
         row.addWidget(self.cmb_bg)
         row.addSpacing(20)
         row.addWidget(self._lbl("工具条自动隐藏"))
-        self.chk_autohide = QCheckBox()
+        self.chk_autohide = Toggle()
         self.chk_autohide.setChecked(bool(STORE.cfg("reader_ui.auto_hide_toolbar", True)))
         self.chk_autohide.stateChanged.connect(
             lambda s: (STORE.set_cfg("reader_ui.auto_hide_toolbar", bool(s)), STORE.save_config()))
@@ -372,7 +385,7 @@ class SettingsPage(QWidget):
         _g3, b3 = self._group(lay, "桌面伪装")
         row = QHBoxLayout()
         row.addWidget(self._lbl("伪装外观"))
-        self.cmb_camo = QComboBox()
+        self.cmb_camo = Selector()
         self.cmb_camo.addItem("Excel 表格", "excel")
         self.cmb_camo.addItem("Word 文档", "word")
         self.cmb_camo.addItem("CMD 终端", "term")
@@ -381,7 +394,7 @@ class SettingsPage(QWidget):
         row.addWidget(self.cmb_camo)
         row.addSpacing(20)
         row.addWidget(self._lbl("伪装时从任务栏隐藏"))
-        self.chk_tb = QCheckBox()
+        self.chk_tb = Toggle()
         self.chk_tb.setChecked(bool(STORE.cfg("camo.hide_in_taskbar", True)))
         self.chk_tb.stateChanged.connect(
             lambda s: (STORE.set_cfg("camo.hide_in_taskbar", bool(s)), STORE.save_config()))
@@ -405,7 +418,7 @@ class SettingsPage(QWidget):
         row.addWidget(self.lbl_op)
         row.addSpacing(18)
         row.addWidget(self._lbl("关闭窗口时"))
-        self.cmb_close = QComboBox()
+        self.cmb_close = Selector()
         self.cmb_close.addItem("每次询问", "ask")
         self.cmb_close.addItem("关闭软件", "quit")
         self.cmb_close.addItem("最小化到托盘", "tray")
@@ -423,13 +436,13 @@ class SettingsPage(QWidget):
         _g6, b6 = self._group(lay, "边缘迷你阅读器")
         row = QHBoxLayout()
         row.addWidget(self._lbl("启用"))
-        self.chk_edge = QCheckBox()
+        self.chk_edge = Toggle()
         self.chk_edge.setChecked(bool(STORE.cfg("edge.enabled", True)))
         self.chk_edge.stateChanged.connect(lambda s: self._emit_edge({"enabled": _nz(s)}))
         row.addWidget(self.chk_edge)
         row.addSpacing(18)
         row.addWidget(self._lbl("停靠位置"))
-        self.cmb_edge_side = QComboBox()
+        self.cmb_edge_side = Selector()
         self.cmb_edge_side.addItem("屏幕右侧", "right")
         self.cmb_edge_side.addItem("屏幕左侧", "left")
         self.cmb_edge_side.setCurrentIndex(0 if STORE.cfg("edge.side", "right") == "right" else 1)
@@ -441,7 +454,7 @@ class SettingsPage(QWidget):
 
         row = QHBoxLayout()
         row.addWidget(self._lbl("收起形态"))
-        self.cmb_edge_shape = QComboBox()
+        self.cmb_edge_shape = Selector()
         self.cmb_edge_shape.addItem("细缝（6px，最隐蔽）", "sliver")
         self.cmb_edge_shape.addItem("窄条（40px，好点中）", "strip")
         self.cmb_edge_shape.setCurrentIndex(0 if STORE.cfg("edge.shape", "sliver") == "sliver" else 1)
@@ -450,7 +463,7 @@ class SettingsPage(QWidget):
         row.addWidget(self.cmb_edge_shape)
         row.addSpacing(18)
         row.addWidget(self._lbl("边缘感应"))
-        self.chk_edge_peek = QCheckBox()
+        self.chk_edge_peek = Toggle()
         self.chk_edge_peek.setChecked(bool(STORE.cfg("edge.auto_peek", True)))
         self.chk_edge_peek.stateChanged.connect(
             lambda s: self._emit_edge({"auto_peek": _nz(s)}))
@@ -500,7 +513,7 @@ class SettingsPage(QWidget):
     @staticmethod
     def _lbl(text: str) -> QLabel:
         l = QLabel(text)
-        l.setStyleSheet("color:#1B1E23;font-size:12px;")
+        l.setObjectName("FormLabel")
         l.setMinimumWidth(130)
         return l
 
@@ -519,7 +532,7 @@ class SettingsPage(QWidget):
         v.setContentsMargins(16, 12, 16, 14)
         v.setSpacing(8)
         t = QLabel(title)
-        t.setStyleSheet("color:#1B1E23;font-size:13px;font-weight:700;")
+        t.setObjectName("GroupTitle")
         v.addWidget(t)
         parent.addWidget(card)
         return card, v
@@ -552,8 +565,8 @@ class SettingsPage(QWidget):
     def set_hotkey_state(self, action: str, ok: bool, spec: str):
         if action == "hide":
             self.lbl_hide_state.setText("已生效" if ok else "注册失败，可能被其它程序占用")
-            self.lbl_hide_state.setStyleSheet(
-                "color:#2E9E5B;font-size:11px;" if ok else "color:#E5484D;font-size:11px;")
+            theme.now(self.lbl_hide_state, "color:%s;font-size:%s;"
+                      % (theme.c("ok" if ok else "danger"), theme.px(11)))
 
     def _open_dir(self, path: str):
         try:

@@ -20,7 +20,7 @@ from PySide6.QtGui import QFont                                  # noqa: E402
 from PySide6.QtWidgets import QApplication                       # noqa: E402
 
 from app.main_window import MainWindow                           # noqa: E402
-from app.theme import QSS                                        # noqa: E402
+from app import theme                                            # noqa: E402
 
 MUTEX_NAME = "Global\\CbzReader_SingleInstance_9F3A"
 ERROR_ALREADY_EXISTS = 183
@@ -171,7 +171,8 @@ def main() -> int:
     app.setApplicationDisplayName("CBZ 阅读器")
     app.setStyle("Fusion")
     app.setFont(QFont("Microsoft YaHei UI", 9))
-    app.setStyleSheet(QSS)
+    theme.init()          # 读取个性化配置（主题 / 强调色 / 圆角 / 字号）
+    theme.apply()         # 生成并应用全局 QSS
 
     win = MainWindow()
     win.show()

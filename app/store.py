@@ -58,6 +58,12 @@ DEFAULTS = {
         "hide_in_taskbar": True,
     },
     "reader_ui": {"auto_hide_toolbar": True},
+    "theme": {
+        "name": "paper",      # paper | linen | mist | sakura | ink | dusk
+        "accent": "",         # "" = 跟随主题；否则 pine/indigo/clay/wine/violet/slate
+        "radius": 10,         # 6 紧凑 | 10 标准 | 14 圆润
+        "scale": 1.0,         # 0.92 小 | 1.0 标准 | 1.08 大 | 1.16 特大
+    },
 }
 
 

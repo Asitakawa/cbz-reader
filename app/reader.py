@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton,
                                QSlider, QVBoxLayout, QWidget)
 
 from .cbr import Cbz
+from . import theme
 from .store import STORE
 from .tasks import ASYNC
 
@@ -53,6 +54,7 @@ class ReaderView(QWidget):
         self._smooth.timeout.connect(self._smooth_step)
         self._smooth_target = 0.0
         ASYNC.sig.page.connect(self._on_page)
+        theme.bus.changed.connect(self.update)
 
     # ================= 打开 / 关闭 =================
     def open_book(self, path: str, start_page: int = 0, pos: float = 0.0) -> bool:
@@ -209,10 +211,12 @@ class ReaderView(QWidget):
                 # 画进布局槽位：源图小于槽位（低分辨率页）时也能正确铺满、不跑位
                 p.drawPixmap(QRect(int(x), int(sy), int(w), int(h)), pm)
             else:
-                p.setPen(QColor("#2A2F38"))
-                p.setBrush(QColor("#1A1E25"))
-                p.drawRoundedRect(QRect(int(x), int(sy), int(w), int(h)), 6, 6)
-                p.setPen(QColor("#6B7280"))
+                dark = QColor(self.bg).lightness() < 128
+                p.setPen(QColor("#2A2F38" if dark else "#DED8CB"))
+                p.setBrush(QColor("#1A1E25" if dark else "#F1ECE1"))
+                p.drawRoundedRect(QRect(int(x), int(sy), int(w), int(h)),
+                                  theme.radius_px(), theme.radius_px())
+                p.setPen(QColor("#6B7280" if dark else "#8E8577"))
                 p.drawText(QRect(int(x), int(sy), int(w), int(h)),
                            Qt.AlignCenter, f"{i + 1} / {self.total}")
         for i in visible:
@@ -428,7 +432,7 @@ class ReaderPage(QWidget):
 
         self.btn_back = QPushButton("← 书架")
         self.lbl_title = QLabel("")
-        self.lbl_title.setStyleSheet("color:#E6E9EE;font-size:12px;font-weight:600;")
+        self.lbl_title.setObjectName("ReaderTitle")
         self.lbl_title.setMaximumWidth(260)
         self.btn_mode = QPushButton("滚动")
         self.btn_mode.setCheckable(True)

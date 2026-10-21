@@ -19,14 +19,15 @@ from .dialogs import PromptDialog
 from .edge import EdgePanel
 from .hotkey import HotkeyManager
 from .pages import HistoryPage, SettingsPage
+from .personalize import PersonalizePage
 from .reader import ReaderPage
 from .shelf import ShelfPage
 from .store import BOOKCOVER_DIR, STORE
 from .tasks import ASYNC
-from .theme import ACCENT, QSS
-from .window import FramelessWindow, MARGIN
+from . import theme
+from .window import FramelessWindow, MARGIN, NavButton, Toggle
 
-NAV = [("📚", "书架"), ("🕘", "历史"), ("⚙", "设置")]
+NAV = [("▤", "书架"), ("◔", "历史"), ("◑", "个性化"), ("⚙", "设置")]
 DEMO_DIR = r"C:\Users\Arelq_\Desktop\各种bat脚本\manga_speace_ccb\O1"
 
 
@@ -35,12 +36,12 @@ def make_icon() -> QIcon:
     pm.fill(Qt.transparent)
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing)
-    p.setBrush(QColor(ACCENT))
+    p.setBrush(QColor(theme.c("accent")))
     p.setPen(Qt.NoPen)
     p.drawRoundedRect(6, 8, 52, 48, 8, 8)
-    p.setBrush(QColor("#FFFFFF"))
+    p.setBrush(QColor(theme.c("accent_text")))
     p.drawRoundedRect(14, 6, 26, 52, 4, 4)
-    p.setPen(QPen(QColor(ACCENT), 3))
+    p.setPen(QPen(QColor(theme.c("accent")), 3))
     p.drawLine(20, 18, 34, 18)
     p.drawLine(20, 28, 34, 28)
     p.end()
@@ -73,38 +74,37 @@ class MainWindow(FramelessWindow):
 
         self.rail = QFrame()
         self.rail.setObjectName("NavRail")
-        self.rail.setFixedWidth(62)
+        self.rail.setFixedWidth(70)
         rl = QVBoxLayout(self.rail)
-        rl.setContentsMargins(6, 10, 6, 10)
+        rl.setContentsMargins(7, 12, 7, 10)
         rl.setSpacing(6)
-        self.nav_btns: list[QPushButton] = []
+        self.nav_btns: list[NavButton] = []
         for i, (icon, name) in enumerate(NAV):
-            b = QPushButton(f"{icon}\n{name}")
-            b.setObjectName("NavBtn")
-            b.setCheckable(True)
-            b.setCursor(Qt.PointingHandCursor)
-            b.setFixedHeight(52)
+            b = NavButton(icon, name)
             b.clicked.connect(lambda _=False, idx=i: self.switch(idx))
             rl.addWidget(b)
             self.nav_btns.append(b)
         rl.addStretch(1)
-        self.btn_camo_rail = QPushButton("🕶\n伪装")
-        self.btn_camo_rail.setObjectName("NavBtn")
-        self.btn_camo_rail.setCursor(Qt.PointingHandCursor)
-        self.btn_camo_rail.setFixedHeight(52)
+        self.btn_camo_rail = NavButton("◉", "伪装")
         self.btn_camo_rail.setToolTip("进入桌面伪装（热键同效）")
         self.btn_camo_rail.clicked.connect(self.toggle_camo)
         rl.addWidget(self.btn_camo_rail)
+        from . import __version__ as _ver
+        foot = QLabel(f"v{_ver}")
+        foot.setObjectName("RailFoot")
+        foot.setAlignment(Qt.AlignCenter)
+        rl.addWidget(foot)
         row.addWidget(self.rail)
 
         self.stack = QStackedWidget()
         self.shelf_page = ShelfPage()
         self.history_page = HistoryPage()
+        self.personalize_page = PersonalizePage()
         self.settings_page = SettingsPage()
         self.reader_page = ReaderPage()
         self.book_page = BookDetailPage()
-        for w in (self.shelf_page, self.history_page, self.settings_page,
-                  self.reader_page, self.book_page):
+        for w in (self.shelf_page, self.history_page, self.personalize_page,
+                  self.settings_page, self.reader_page, self.book_page):
             self.stack.addWidget(w)
         row.addWidget(self.stack, 1)
 
@@ -127,6 +127,7 @@ class MainWindow(FramelessWindow):
 
         self.history_page.open_book.connect(self.open_chapter)
         self.history_page.toast.connect(self.toast)
+        self.personalize_page.toast.connect(self.toast)
         self.settings_page.toast.connect(self.toast)
         self.settings_page.hotkey_changed.connect(self._on_hotkey_changed)
         self.settings_page.opacity_changed.connect(self.set_window_opacity)
@@ -179,6 +180,8 @@ class MainWindow(FramelessWindow):
         a_show.triggered.connect(self.toggle_hide)
         a_shelf = tm.addAction("书架")
         a_shelf.triggered.connect(lambda: self.show_window(0))
+        a_look = tm.addAction("个性化外观")
+        a_look.triggered.connect(lambda: self.show_window(2))
         self.a_edge = tm.addAction("边缘迷你阅读器")
         self.a_edge.setCheckable(True)
         self.a_edge.setChecked(bool(STORE.cfg("edge.enabled", True)))
@@ -198,6 +201,7 @@ class MainWindow(FramelessWindow):
         self.title_bar.btn_cam.setToolTip(f"桌面伪装（{STORE.cfg('hotkey_camo', '')}）")
         self.title_bar.btn_hide.setToolTip(f"隐藏 / 恢复窗口（{STORE.cfg('hotkey_hide', '')}）")
 
+        theme.bus.changed.connect(self._on_theme_changed)
         self.set_window_opacity(float(STORE.cfg("window.opacity", 1.0)))
         self.restore_geometry(STORE.cfg("window", {}) or {})
         self.switch(0)
@@ -206,6 +210,7 @@ class MainWindow(FramelessWindow):
 
     # ================= 导航 =================
     def switch(self, idx: int):
+        self.rail.setVisible(True)
         if idx != 3 and self._full:
             self.toggle_fullscreen()
         self.stack.setCurrentIndex(idx)
@@ -214,6 +219,8 @@ class MainWindow(FramelessWindow):
         if idx == 1:
             self.history_page.refresh()
         elif idx == 2:
+            self.personalize_page.refresh()
+        elif idx == 3:
             self.settings_page.refresh()
         elif idx == 0:
             self.shelf_page.refresh()
@@ -352,6 +359,7 @@ class MainWindow(FramelessWindow):
         STORE.touch_history(cid, name, self.reader_page.view.current, total, pos, count=True)
         STORE.save_all()
         self.stack.setCurrentWidget(self.reader_page)
+        self.rail.setVisible(False)          # 沉浸阅读：让页面占满整个窗口
         for b in self.nav_btns:
             b.setChecked(False)
         self.update_title(f"{book_title} · {name}" if book_title else name, "阅读中")
@@ -371,6 +379,7 @@ class MainWindow(FramelessWindow):
         if self._full:
             self.toggle_fullscreen()
             return
+        self.rail.setVisible(True)
         self._flush_history()
         cid = self._cur.get("cid", "")
         bid = (STORE.chapter(cid) or {}).get("book", "") if cid else ""
@@ -720,7 +729,7 @@ class MainWindow(FramelessWindow):
         b_quit = box.addButton("关闭软件", QMessageBox.DestructiveRole)
         b_tray = box.addButton("最小化到托盘", QMessageBox.AcceptRole)
         b_cancel = box.addButton("取消", QMessageBox.RejectRole)
-        chk = QCheckBox("记住我的选择（可在「设置」中修改）")
+        chk = Toggle("记住我的选择（可在「设置」中修改）")
         box.setCheckBox(chk)
         box.exec()
         clicked = box.clickedButton()
@@ -779,6 +788,12 @@ class MainWindow(FramelessWindow):
             self.toast("部分全局热键被占用，可在「设置」里修改")
 
     # ================= 提示条 =================
+    def _on_theme_changed(self):
+        icon = make_icon()
+        self.setWindowIcon(icon)
+        if hasattr(self, "tray"):
+            self.tray.setIcon(icon)
+
     def toast(self, text: str):
         if self._camo:
             return
@@ -799,8 +814,8 @@ class MainWindow(FramelessWindow):
 
     def keyPressEvent(self, e):
         k, m = e.key(), e.modifiers()
-        if m & Qt.AltModifier and k in (Qt.Key_1, Qt.Key_2, Qt.Key_3):
-            self.switch({Qt.Key_1: 0, Qt.Key_2: 1, Qt.Key_3: 2}[k])
+        if m & Qt.AltModifier and k in (Qt.Key_1, Qt.Key_2, Qt.Key_3, Qt.Key_4):
+            self.switch({Qt.Key_1: 0, Qt.Key_2: 1, Qt.Key_3: 2, Qt.Key_4: 3}[k])
         elif m & Qt.ControlModifier and k == Qt.Key_F:
             self.switch(0)
             self.shelf_page.search.setFocus()
