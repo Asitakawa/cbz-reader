@@ -32,6 +32,8 @@ class ReaderView(QWidget):
         self.layout: list[tuple[float, float, float, float]] = []
         self._cache: dict[int, QPixmap] = {}
         self._order: list[int] = []
+        dpr = self.devicePixelRatioF() or 1.0
+        self._cache_max = CACHE_MAX if dpr <= 1.25 else max(6, int(CACHE_MAX / (dpr * dpr)))
         self._loading: set[int] = set()
 
         r = STORE.cfg("reader", {})
@@ -122,16 +124,32 @@ class ReaderView(QWidget):
         if i < 0 or i >= len(self.layout):
             return 0, 0
         _x, _y, w, h = self.layout[i]
-        return min(int(w) + 2, MAX_DECODE_W), min(int(h) + 2, MAX_DECODE_H)
+        # 按「物理像素」解码：高 DPI 屏上若按逻辑像素出图，Qt 会再放大绘制导致发虚
+        dpr = self.devicePixelRatioF() or 1.0
+        return (min(int((w + 2) * dpr), MAX_DECODE_W),
+                min(int((h + 2) * dpr), MAX_DECODE_H))
 
     def request(self, i: int):
         if not self.book or i < 0 or i >= self.total:
             return
-        if i in self._loading or i in self._cache:
+        if i in self._loading:
             return
         tw, th = self._target_size(i)
         if tw <= 0:
             return
+        cached = self._cache.get(i)
+        if cached is not None:
+            # 尺寸校验：布局没定尺寸时解码出来的小图不能一直用（会发虚），
+            # 目标变大就丢弃重解；但不能超过原图自身宽度，否则会反复重解。
+            src_w = self.sizes[i][0] if i < len(self.sizes) else tw
+            need = min(tw, int(src_w))
+            if cached.width() >= need * 0.92:
+                return
+            self._cache.pop(i, None)
+            try:
+                self._order.remove(i)
+            except ValueError:
+                pass
         self._loading.add(i)
         ASYNC.page(str(self.book.path), self.book.key, i, tw, th)
 
@@ -154,9 +172,11 @@ class ReaderView(QWidget):
         self._loading.discard(index)
         if image is None or image.isNull():
             return
-        self._cache[index] = QPixmap.fromImage(image)
+        pm = QPixmap.fromImage(image)
+        pm.setDevicePixelRatio(self.devicePixelRatioF() or 1.0)
+        self._cache[index] = pm
         self._order.append(index)
-        while len(self._order) > CACHE_MAX:
+        while len(self._order) > self._cache_max:
             self._cache.pop(self._order.pop(0), None)
         self.update()
 
@@ -168,6 +188,7 @@ class ReaderView(QWidget):
     # ================= 绘制 =================
     def paintEvent(self, e):
         p = QPainter(self)
+        p.setRenderHint(QPainter.SmoothPixmapTransform, True)
         p.fillRect(self.rect(), QColor(self.bg))
         if not self.layout:
             p.end()
@@ -184,7 +205,8 @@ class ReaderView(QWidget):
             visible.append(i)
             pm = self._cache.get(i)
             if pm is not None and not pm.isNull():
-                p.drawPixmap(int(x), int(sy), pm)
+                # 画进布局槽位：源图小于槽位（低分辨率页）时也能正确铺满、不跑位
+                p.drawPixmap(QRect(int(x), int(sy), int(w), int(h)), pm)
             else:
                 p.setPen(QColor("#2A2F38"))
                 p.setBrush(QColor("#1A1E25"))

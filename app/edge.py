@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import (QAbstractAnimation, QEasingCurve, QPoint,
-                            QPropertyAnimation, QRect, Qt, QTimer, Signal)
+                            QPropertyAnimation, QRect, QSize, Qt, QTimer, Signal)
 from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPixmap
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
                                QVBoxLayout, QWidget)
@@ -28,6 +28,7 @@ class _Canvas(QWidget):
     """绘制漫画页（等比适应窗口），并响应滚轮/点击/双击。"""
 
     wheeled = Signal(int)          # +1 下一页 / -1 上一页
+    zoomed = Signal(int)           # Ctrl+滚轮：+1 放大 / -1 缩小
     tapped = Signal(int)           # -1 左 / 0 中 / +1 右
     dbl = Signal()
 
@@ -53,8 +54,12 @@ class _Canvas(QWidget):
         if self._pm is None or self._pm.isNull():
             self._scaled = None
             return
-        self._scaled = self._pm.scaled(self.size(), Qt.KeepAspectRatio,
-                                       Qt.SmoothTransformation)
+        # 按物理像素缩放，避免高 DPI 屏上再被放大一次导致发虚
+        dpr = self.devicePixelRatioF() or 1.0
+        target = QSize(int(self.width() * dpr), int(self.height() * dpr))
+        pm = self._pm.scaled(target, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        pm.setDevicePixelRatio(dpr)
+        self._scaled = pm
 
     def resizeEvent(self, e):
         self._rescale()
@@ -64,9 +69,10 @@ class _Canvas(QWidget):
         p = QPainter(self)
         p.fillRect(self.rect(), QColor("#0C0E12"))
         if self._scaled is not None and not self._scaled.isNull():
-            x = (self.width() - self._scaled.width()) // 2
-            y = (self.height() - self._scaled.height()) // 2
-            p.drawPixmap(x, y, self._scaled)
+            dpr = self._scaled.devicePixelRatio() or 1.0
+            lw, lh = self._scaled.width() / dpr, self._scaled.height() / dpr
+            p.drawPixmap(int((self.width() - lw) / 2), int((self.height() - lh) / 2),
+                         self._scaled)
         elif self._hint:
             p.setPen(QColor("#7C838F"))
             f = p.font()
@@ -77,6 +83,10 @@ class _Canvas(QWidget):
         p.end()
 
     def wheelEvent(self, e):
+        if e.modifiers() & Qt.ControlModifier:      # Ctrl+滚轮 = 调整阅读窗宽度
+            self.zoomed.emit(1 if e.angleDelta().y() > 0 else -1)
+            e.accept()
+            return
         dy = e.angleDelta().y()
         if e.modifiers() & Qt.ShiftModifier or abs(e.angleDelta().x()) > abs(dy):
             step = -1 if e.angleDelta().x() > 0 else 1
@@ -117,7 +127,9 @@ class EdgePanel(QWidget):
         self.auto_peek = bool(STORE.cfg("edge.auto_peek", True))
         self.expanded = False
         self.suspended = False
+        self.pinned = False          # 钉住：不自动缩回（截图/调试用）
 
+        self.width_target = int(STORE.cfg("edge.width", PEEK_W) or PEEK_W)
         self._cid = ""
         self._path = ""
         self._name = ""
@@ -190,6 +202,7 @@ class EdgePanel(QWidget):
         self.btn_open.clicked.connect(self.open_in_main)
         self.btn_fold.clicked.connect(self.collapse)
         self.canvas.wheeled.connect(self.turn)
+        self.canvas.zoomed.connect(self.resize_step)
         self.canvas.tapped.connect(lambda d: self.turn(d) if d else None)
         self.canvas.dbl.connect(self.open_in_main)
 
@@ -200,10 +213,6 @@ class EdgePanel(QWidget):
         self._poll = QTimer(self)
         self._poll.setInterval(120)
         self._poll.timeout.connect(self._tick)
-        self._fold_timer = QTimer(self)
-        self._fold_timer.setSingleShot(True)
-        self._fold_timer.setInterval(900)
-        self._fold_timer.timeout.connect(self.collapse)
         self._bar_timer = QTimer(self)
         self._bar_timer.setSingleShot(True)
         self._bar_timer.setInterval(1800)
@@ -215,6 +224,29 @@ class EdgePanel(QWidget):
     # ================= 宽度 / 几何 =================
     def collapsed_w(self) -> int:
         return STRIP_W if self.shape == "strip" else SLIVER_W
+
+    def _clamp_w(self, w: int) -> int:
+        scr = self._screen()
+        return max(280, min(int(w), min(760, scr.width() - 80), ))
+
+    def peek_w(self) -> int:
+        self.width_target = self._clamp_w(self.width_target)
+        return self.width_target
+
+    def resize_step(self, step: int):
+        """Ctrl+滚轮调整滑出后的阅读窗宽度。"""
+        target = self._clamp_w(self.width_target + step * 40)
+        if target == self.width_target:
+            return
+        self.width_target = target
+        STORE.set_cfg("edge.width", target)
+        STORE.save_config()
+        self._cache.clear()
+        self._pending.clear()
+        if self.expanded:
+            self._animate(self._geo_for(target))
+            self._load_page(self._page, force=True)
+        self._layout_children()
 
     def peek_h(self) -> int:
         scr = self._screen()
@@ -292,7 +324,6 @@ class EdgePanel(QWidget):
         self.suspended = on
         if on:
             self._poll.stop()
-            self._fold_timer.stop()
             self._bar_timer.stop()
             self.hide()
         else:
@@ -300,7 +331,6 @@ class EdgePanel(QWidget):
 
     def shutdown(self):
         self._poll.stop()
-        self._fold_timer.stop()
         self.hide()
         self.close()
 
@@ -312,7 +342,7 @@ class EdgePanel(QWidget):
         self.card.show()
         self.empty.setVisible(not self._cid)
         self.canvas.setVisible(bool(self._cid))
-        self._animate(self._geo_for(PEEK_W))
+        self._animate(self._geo_for(self.peek_w()))
         self._bar_timer.start()
         if self._cid:
             self._load_page(self._page)
@@ -322,7 +352,6 @@ class EdgePanel(QWidget):
             return
         self.expanded = False
         self.bar.hide()
-        self._fold_timer.stop()
         self._bar_timer.stop()
         self._animate(self._geo_for(self.collapsed_w()))
         if self._cid:
@@ -337,6 +366,9 @@ class EdgePanel(QWidget):
 
     def toggle(self):
         self.collapse() if self.expanded else self.expand()
+
+    def pin(self, on: bool = True):
+        self.pinned = bool(on)
 
     def _animate(self, target: QRect):
         self.anim.stop()
@@ -412,7 +444,10 @@ class EdgePanel(QWidget):
 
     # ---------- 页面解码 ----------
     def _display_size(self):
-        return (max(80, PEEK_W - 2), max(80, self.peek_h() - 2))
+        dpr = self.devicePixelRatioF() or 1.0
+        w = max(120, self.peek_w() - 2)
+        h = max(120, self.peek_h() - 2)
+        return (int(w * dpr), int(h * dpr))
 
     def _load_page(self, index: int, force: bool = False):
         if not self._cid:
@@ -468,13 +503,13 @@ class EdgePanel(QWidget):
         self._bar_timer.start()
 
     def enterEvent(self, e):
-        self._fold_timer.stop()
         self._show_bar()
         super().enterEvent(e)
 
     def leaveEvent(self, e):
-        self._fold_timer.start()
         super().leaveEvent(e)
+        if self.expanded and not self.pinned:   # 鼠标离开立即缩回，不留延迟
+            self.collapse()
 
     def mouseMoveEvent(self, e):
         self._show_bar()
@@ -497,10 +532,8 @@ class EdgePanel(QWidget):
             if inside or (self.auto_peek and on_edge and in_range):
                 self.expand()
             return
-        if inside:
-            self._fold_timer.stop()
-        elif not self._fold_timer.isActive():
-            self._fold_timer.start()
+        if not inside and not self.pinned:      # 立即缩回（无延迟）
+            self.collapse()
 
     # ================= 右键菜单 =================
     def _menu(self, pos: QPoint):

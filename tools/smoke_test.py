@@ -217,10 +217,22 @@ def main() -> int:
     cid_now = e.current_chapter()["cid"]
     check("翻页写回阅读进度",
           int((STORE.progress(cid_now) or {}).get("page", -1)) == e._page)
-    e.collapse()
-    pump(1.0)
-    check("鼠标离开自动缩回细缝",
+    e._tick()                     # 模拟光标已离开（无延迟，应立刻缩回）
+    pump(0.5)
+    check("鼠标离开立即缩回细缝",
           not e.expanded and e.width() == 6 and not e.card.isVisible(), f"w={e.width()}")
+    e.expand()
+    pump(0.6)
+    w0 = e.width()
+    e.canvas.zoomed.emit(1)       # Ctrl+滚轮
+    pump(0.8)
+    zoomed_ok = e.width() == w0 + 40
+    e.canvas.zoomed.emit(-1)
+    pump(0.8)
+    check("Ctrl+滚轮调整阅读窗大小", zoomed_ok and e.width() == w0,
+          f"{w0} → {w0 + 40} → {e.width()}")
+    e._tick()
+    pump(0.4)
     e.set_shape("strip")
     pump(0.6)
     strip_ok = e.width() == 40
@@ -252,11 +264,13 @@ def main() -> int:
     check("退出伪装恢复小窗", not win._camo and e.isVisible())
 
     win.toggle_hide()
-    pump(0.3)
+    pump(0.5)
     hidden = not win.isVisible()
+    edge_hidden = not e.isVisible()
     win.toggle_hide()
-    pump(0.3)
-    check("热键隐藏/恢复", hidden and win.isVisible())
+    pump(0.8)
+    check("热键隐藏时迷你阅读器一起藏起",
+          hidden and edge_hidden and win.isVisible() and e.isVisible())
     win.toggle_fullscreen()
     pump(0.4)
     fs = win._full

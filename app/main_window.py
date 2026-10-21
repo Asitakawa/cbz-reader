@@ -58,6 +58,7 @@ class MainWindow(FramelessWindow):
         self._cur: dict = {}          # 当前阅读：{cid, path, name, bid, title}
         self._camo = False
         self._full = False
+        self._hidden = False
         self._import_bid: str | None = None
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
@@ -579,7 +580,7 @@ class MainWindow(FramelessWindow):
 
     def _sync_edge(self):
         want = (bool(STORE.cfg("edge.enabled", True))
-                and not self._camo and not self._full)
+                and not self._camo and not self._full and not self._hidden)
         self.edge.suspend(not want)
         if self.a_edge.isChecked() != bool(STORE.cfg("edge.enabled", True)):
             self.a_edge.blockSignals(True)
@@ -661,16 +662,21 @@ class MainWindow(FramelessWindow):
             pass
 
     def show_window(self, idx: int | None = None):
+        self._hidden = False
         self.showNormal()
         self.raise_()
         self.activateWindow()
         if idx is not None:
             self.switch(idx)
+        self._sync_edge()
 
     def toggle_hide(self):
         if self.isVisible() and not self.isMinimized():
             self._flush_history()
+            self._hidden = True
+            self.edge.collapse()
             self.hide()
+            self._sync_edge()          # 主窗口隐藏时，边缘迷你阅读器一起藏起来
             if self.tray.supportsMessages():
                 self.tray.showMessage("CBZ 阅读器", "窗口已隐藏，按热键恢复",
                                       QSystemTrayIcon.Information, 1500)

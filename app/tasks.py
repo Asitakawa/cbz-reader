@@ -55,6 +55,7 @@ class _PageJob(QRunnable):
             self.sig.page.emit(self.key, self.index, pil_to_qimage(im))
         except Exception:
             traceback.print_exc(file=sys.stderr)
+            self.sig.page.emit(self.key, self.index, None)   # 失败也要回信号，释放 loading 标记
 
 
 class _ImportJob(QRunnable):
