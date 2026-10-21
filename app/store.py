@@ -67,6 +67,61 @@ DEFAULTS = {
 }
 
 
+# ================= 话数排列 =================
+ORDER_MODES = {
+    "source": "默认（导入顺序）",
+    "natural": "数字顺序（1, 1.5, 2）",
+    "sub_before": "小节前置（3.1, 3.2, 3）",
+    "part": "上下篇（1上, 1下, 1）",
+}
+DEFAULT_ORDER = "source"
+
+_PART_RANK = (("上", 0), ("前", 0), ("中", 1), ("下", 2), ("后", 2),
+              ("续", 3), ("完", 4), ("终", 5))
+
+
+def _first_number(name: str):
+    import re
+    m = re.search(r"((?:\d+)(?:[.．]\d+)?)", str(name))
+    if not m:
+        return None
+    try:
+        return float(m.group(1).replace("．", "."))
+    except ValueError:
+        return None
+
+
+def _part_rank(name: str) -> int:
+    import re
+    low = str(name).lower()
+    for key, rank in _PART_RANK:
+        if key in low:
+            return rank
+    m = re.search(r"part\s*(\d+)", low)
+    return int(m.group(1)) if m else -1
+
+
+def chapter_order_key(ch: dict, mode: str):
+    """按模式生成排序键；source 模式另行处理。"""
+    from .cbr import natkey
+    name = str(ch.get("name", ""))
+    num = _first_number(name)
+    part = _part_rank(name)
+    if num is None:
+        return (1, 0.0, 0, part, natkey(name))
+    if mode == "natural":
+        return (0, num, 0, part, natkey(name))
+    if mode == "part":
+        # 同一话的「上/中/下」先排，未分篇的整话排在后面
+        return (0, num, 0 if part >= 0 else 1, part, natkey(name))
+    whole = int(num)
+    frac = round(num - whole, 6)
+    if mode == "sub_before":
+        # 3.1 / 3.2 在 3 之前
+        return (0, float(whole), 0 if frac else 1, frac, part, natkey(name))
+    return (0, num, 0, part, natkey(name))
+
+
 def _deep_merge(base: dict, over: dict) -> dict:
     out = dict(base)
     for k, v in (over or {}).items():
@@ -266,11 +321,31 @@ class Store:
             c = self.chapters.get(cid)
             return dict(c) if c else None
 
-    def chapters_of(self, bid: str) -> list[dict]:
-        from .cbr import natkey
+    def book_order(self, bid: str) -> str:
+        with self._lock:
+            mode = (self.books.get(bid) or {}).get("order", DEFAULT_ORDER)
+        return mode if mode in ORDER_MODES else DEFAULT_ORDER
+
+    def set_book_order(self, bid: str, mode: str) -> None:
+        with self._lock:
+            if bid in self.books and mode in ORDER_MODES:
+                self.books[bid]["order"] = mode
+
+    def chapters_of(self, bid: str, order: str | None = None) -> list[dict]:
+        """按本书设置的排列方式返回各话。
+
+        source（默认）= 按导入先后，不做任何重排；其余模式按名称解析。
+        """
         with self._lock:
             items = [dict(v) for v in self.chapters.values() if v.get("book") == bid]
-        items.sort(key=lambda x: natkey(x.get("name", "")))
+            mode = order or (self.books.get(bid) or {}).get("order", DEFAULT_ORDER)
+        if mode not in ORDER_MODES:
+            mode = DEFAULT_ORDER
+        if mode == "source":
+            # 稳定排序：added 相同（或缺失）时保留 dict 的插入顺序
+            items.sort(key=lambda x: float(x.get("added", 0) or 0))
+        else:
+            items.sort(key=lambda x: chapter_order_key(x, mode))
         return items
 
     def rename_chapter(self, cid: str, name: str) -> None:

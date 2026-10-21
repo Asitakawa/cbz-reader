@@ -11,9 +11,10 @@ from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
 
 from .cbr import natkey
 from .imgutil import cover_pixmap
-from .store import BOOKCOVER_DIR, COVER_DIR, STORE
+from .store import BOOKCOVER_DIR, COVER_DIR, ORDER_MODES, STORE
 from .tasks import ASYNC
 from . import theme
+from .window import Selector
 
 COVER_W, COVER_H = 104, 146
 
@@ -159,6 +160,14 @@ class BookDetailPage(QWidget):
         self.btn_back.setCursor(Qt.PointingHandCursor)
         self.btn_back.clicked.connect(self.back_requested)
         bar.addWidget(self.btn_back)
+        bar.addSpacing(6)
+        self.cmb_order = Selector()
+        self.cmb_order.setFixedWidth(196)
+        self.cmb_order.setToolTip("话数排列方式（每本书单独设置，默认按导入顺序）")
+        for key, label in ORDER_MODES.items():
+            self.cmb_order.addItem(label, key)
+        self.cmb_order.currentIndexChanged.connect(self._on_order_changed)
+        bar.addWidget(self.cmb_order)
         bar.addStretch(1)
         self.btn_resume = QPushButton("继续阅读")
         self.btn_resume.setObjectName("Primary")
@@ -236,6 +245,24 @@ class BookDetailPage(QWidget):
         ASYNC.sig.cover.connect(self._on_cover)
         theme.bus.changed.connect(self._on_theme_changed)
 
+    def _sync_order_box(self):
+        mode = STORE.book_order(self.bid)
+        idx = self.cmb_order.findData(mode)
+        if idx >= 0:
+            self.cmb_order.blockSignals(True)
+            self.cmb_order.setCurrentIndex(idx)
+            self.cmb_order.blockSignals(False)
+
+    def _on_order_changed(self, _i):
+        mode = self.cmb_order.currentData()
+        if not self.bid or not mode:
+            return
+        STORE.set_book_order(self.bid, mode)
+        STORE.save_all()
+        self.refresh()
+        self.changed.emit()
+        self.toast.emit(f"话数排列：{ORDER_MODES.get(mode, mode)}")
+
     def _on_theme_changed(self):
         # 行内的进度色/状态色是即时写死的，主题切换后重建一次
         if self.bid:
@@ -254,6 +281,7 @@ class BookDetailPage(QWidget):
         if not b:
             return
         st = STORE.book_stats(self.bid)
+        self._sync_order_box()
         self._title = b["title"]
         self.lbl_title.setToolTip(b["title"])
         self._fit_title()

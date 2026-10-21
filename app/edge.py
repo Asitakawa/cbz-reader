@@ -22,7 +22,7 @@ PEEK_W = 420         # 滑出后的阅读窗宽度
 PEEK_MAX_H = 860
 RADIUS = 12
 CACHE_MAX = 6
-BAR_H = 34
+BAR_H = 58
 
 
 class _Canvas(QWidget):
@@ -241,9 +241,13 @@ class EdgePanel(QWidget):
         # 底部信息条（悬停时出现，自动隐藏）
         self.bar = QFrame(self)
         self.bar.setObjectName("MiniBar")
-        bl = QHBoxLayout(self.bar)
-        bl.setContentsMargins(10, 5, 8, 5)
-        bl.setSpacing(8)
+        bl = QVBoxLayout(self.bar)
+        bl.setContentsMargins(9, 6, 9, 6)
+        bl.setSpacing(4)
+        top = QHBoxLayout()
+        top.setSpacing(6)
+        bottom = QHBoxLayout()
+        bottom.setSpacing(6)
         self.lbl_title = QLabel("")
         theme.style(self.lbl_title,
                     "color:$overlay_text;font-size:$f11;font-weight:600;")
@@ -261,13 +265,16 @@ class EdgePanel(QWidget):
             b.setFixedHeight(22)
         self.btn_prev.setFixedWidth(24)
         self.btn_next.setFixedWidth(24)
-        bl.addWidget(self.lbl_title, 1)
-        bl.addWidget(self.btn_chapters)
-        bl.addWidget(self.btn_prev)
-        bl.addWidget(self.lbl_page)
-        bl.addWidget(self.btn_next)
-        bl.addWidget(self.btn_open)
-        bl.addWidget(self.btn_fold)
+        top.addWidget(self.lbl_title, 1)
+        bottom.addWidget(self.btn_chapters)
+        bottom.addWidget(self.btn_prev)
+        bottom.addWidget(self.lbl_page)
+        bottom.addWidget(self.btn_next)
+        bottom.addStretch(1)
+        bottom.addWidget(self.btn_open)
+        bottom.addWidget(self.btn_fold)
+        bl.addLayout(top)
+        bl.addLayout(bottom)
         self.bar.hide()
 
         # 空态：最近在读列表
@@ -359,6 +366,7 @@ class EdgePanel(QWidget):
     def resizeEvent(self, e):
         super().resizeEvent(e)
         self._layout_children()
+        self._fit_title()
 
     def _layout_children(self):
         w, h = self.width(), self.height()
@@ -524,9 +532,24 @@ class EdgePanel(QWidget):
             self._load_page(self._page)
 
     def set_chapters(self, chapters: list[dict], current: str = ""):
-        """主窗口同步当前书的全部话数，供小窗内切换。"""
+        """主窗口同步当前书的全部话数，供小窗内切换 / 接续下一话。"""
         self._chapters = list(chapters or [])
         self.btn_chapters.setVisible(len(self._chapters) > 1)
+        self._sync_page_label()
+
+    def _chapter_index(self) -> int:
+        for i, ch in enumerate(self._chapters):
+            if ch.get("id") == self._cid:
+                return i
+        return -1
+
+    def neighbor_chapter(self, step: int) -> dict | None:
+        """同一本书里相邻的一话（step=+1 下一话 / -1 上一话）。"""
+        i = self._chapter_index()
+        if i < 0:
+            return None
+        j = i + step
+        return self._chapters[j] if 0 <= j < len(self._chapters) else None
 
     def _choose_chapter(self):
         if not self._chapters:
@@ -541,7 +564,7 @@ class EdgePanel(QWidget):
         picker.show()
         self._picker = picker
 
-    def _switch_chapter(self, cid: str):
+    def _switch_chapter(self, cid: str, page: int | None = None, to_end: bool = False):
         ch = next((c for c in self._chapters if c.get("id") == cid), None)
         if not ch:
             return
@@ -554,7 +577,11 @@ class EdgePanel(QWidget):
                 src.close()
             except Exception:
                 total = 0
-        page = int((STORE.progress(cid) or {}).get("page", 0) or 0)
+        if to_end and total:
+            page = total - 1
+        elif page is None:
+            page = int((STORE.progress(cid) or {}).get("page", 0) or 0)
+        page = max(0, min(int(page or 0), total - 1)) if total else int(page or 0)
         book = (STORE.book(ch.get("book", "")) or {}).get("title", "")
         self.set_chapter(ch.get("path", ""), ch.get("name", ""), cid, book, page, total)
         STORE.touch_history(cid, ch.get("name", ""), page, total)
@@ -565,6 +592,31 @@ class EdgePanel(QWidget):
     def _sync_page_label(self):
         self.lbl_page.setText(
             f"{self._page + 1} / {self._total}" if self._total else "—")
+        self._sync_nav_buttons()
+        self._fit_title()
+
+    def _sync_nav_buttons(self):
+        nxt, prv = self.neighbor_chapter(1), self.neighbor_chapter(-1)
+        at_end = bool(self._total) and self._page >= self._total - 1
+        at_start = self._page <= 0
+        nx = bool(at_end and nxt)
+        pv = bool(at_start and prv)
+        self.btn_next.setText("下一话" if nx else "›")
+        self.btn_next.setFixedWidth(52 if nx else 24)
+        self.btn_next.setToolTip(
+            f"下一话 · {nxt.get('name', '')}" if nx else "下一页（滚轮 / 点击右侧）")
+        self.btn_prev.setText("上一话" if pv else "‹")
+        self.btn_prev.setFixedWidth(52 if pv else 24)
+        self.btn_prev.setToolTip(
+            f"上一话 · {prv.get('name', '')}" if pv else "上一页（滚轮 / 点击左侧）")
+
+    def _fit_title(self):
+        head = f"{self._book} · {self._name}" if self._book else self._name
+        # 两行布局：标题独占一行，宽度按面板宽度算
+        avail = max(80, self.width() - 36)
+        fm = self.lbl_title.fontMetrics()
+        self.lbl_title.setText(fm.elidedText(head, Qt.ElideMiddle, avail))
+        self.lbl_title.setToolTip(f"{head}\n第 {self._page + 1} / {self._total} 页")
 
     def current_chapter(self) -> dict:
         return {"path": self._path, "name": self._name, "cid": self._cid,
@@ -574,10 +626,18 @@ class EdgePanel(QWidget):
         if not self._cid or step == 0:
             return
         target = self._page + step
-        if target < 0:
-            target = 0
-        if self._total and target > self._total - 1:
+        if step > 0 and self._total and target > self._total - 1:
+            nxt = self.neighbor_chapter(1)
+            if nxt:                     # 末页继续往后 → 自动进入下一话
+                self._switch_chapter(nxt["id"], page=0)
+                return
             target = self._total - 1
+        elif step < 0 and target < 0:
+            prv = self.neighbor_chapter(-1)
+            if prv:                     # 首页继续往前 → 上一话最后一页
+                self._switch_chapter(prv["id"], to_end=True)
+                return
+            target = 0
         if target == self._page:
             return
         self._page = target
@@ -701,6 +761,12 @@ class EdgePanel(QWidget):
     # ================= 右键菜单 =================
     def _menu(self, pos: QPoint):
         m = QMenu(self)
+        nxt, prv = self.neighbor_chapter(1), self.neighbor_chapter(-1)
+        a_prev_ch = m.addAction(f"上一话：{prv.get('name', '')}" if prv else "上一话")
+        a_prev_ch.setEnabled(bool(prv))
+        a_next_ch = m.addAction(f"下一话：{nxt.get('name', '')}" if nxt else "下一话")
+        a_next_ch.setEnabled(bool(nxt))
+        m.addSeparator()
         a_open = m.addAction("在主窗口打开当前页")
         a_fold = m.addAction("收起")
         a_side = m.addAction("停靠到左侧" if self.side == "right" else "停靠到右侧")
@@ -711,7 +777,13 @@ class EdgePanel(QWidget):
         chosen = m.exec(self.mapToGlobal(pos))
         if chosen is None:
             return
-        if chosen == a_open:
+        if chosen == a_prev_ch:
+            if prv:
+                self._switch_chapter(prv["id"], to_end=True)
+        elif chosen == a_next_ch:
+            if nxt:
+                self._switch_chapter(nxt["id"], page=0)
+        elif chosen == a_open:
             self.open_in_main.emit()
         elif chosen == a_fold:
             self.collapse()

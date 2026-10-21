@@ -256,6 +256,29 @@ def main() -> int:
             expect_h = int(e.peek_w() * pm_sw.height() / pm_sw.width())
             check("小窗高度贴合图片比例", abs(e.height() - expect_h) <= 4,
                   f"窗 {e.width()}x{e.height()} 期望高 {expect_h}")
+        idx = e._chapter_index()
+        nxt_ch = e.neighbor_chapter(1)
+        if idx >= 0 and nxt_ch:
+            total = e._total or 1
+            e.set_progress(total - 1, total)
+            pump(0.4)
+            label = e.btn_next.text()
+            e.turn(1)
+            pump(1.0)
+            check("小窗末页接续下一话",
+                  e.current_chapter()["cid"] == nxt_ch["id"] and e._page == 0,
+                  f"按钮「{label}」→ {e._name} 第 {e._page + 1} 页")
+            prv_ch = e.neighbor_chapter(-1)
+            e.set_progress(0, e._total or 1)
+            pump(0.3)
+            label_prev = e.btn_prev.text()
+            if prv_ch:
+                e.turn(-1)
+                pump(1.0)
+                check("小窗首页回退上一话",
+                      e.current_chapter()["cid"] == prv_ch["id"]
+                      and e._page == max(0, (e._total or 1) - 1),
+                      f"按钮「{label_prev}」→ {e._name} 第 {e._page + 1}/{e._total} 页")
     e._tick()                     # 模拟光标已离开（无延迟，应立刻缩回）
     pump(0.5)
     check("鼠标离开立即缩回细缝",
@@ -379,6 +402,32 @@ def main() -> int:
                                             Qt.LeftButton, Qt.NoButton, Qt.NoModifier))
     pump(0.3)
     check("下边缘缩放", win.height() == g.height() + 80, f"h={win.height()}")
+
+    # ---------- 10.5 话数排列策略 ----------
+    bid_sort = STORE.add_book("__排序测试__")
+    names = ["第10话", "第2话", "第3话下", "第1话", "第3.2话", "第1.5话",
+             "第3话上", "第3.1话", "第2.5话", "第3话", "第4话", "第5话"]
+    for i, n in enumerate(names):
+        STORE.add_chapter(bid_sort, str(SHOTS / f"fake_{i}.cbz"), n)
+    got = [c["name"] for c in STORE.chapters_of(bid_sort)]
+    check("默认按导入顺序（不改动）", got == names, "→".join(got[:4]))
+    STORE.set_book_order(bid_sort, "natural")
+    got = [c["name"] for c in STORE.chapters_of(bid_sort)]
+    check("数字顺序 1,1.5,2,2.5", got[:4] == ["第1话", "第1.5话", "第2话", "第2.5话"],
+          "→".join(got[:5]))
+    STORE.set_book_order(bid_sort, "sub_before")
+    got = [c["name"] for c in STORE.chapters_of(bid_sort)]
+    check("小节前置 3.1,3.2,3",
+          got.index("第3.1话") < got.index("第3话") and got.index("第3.2话") < got.index("第3话"),
+          "→".join(got[6:9]))
+    STORE.set_book_order(bid_sort, "part")
+    got = [c["name"] for c in STORE.chapters_of(bid_sort)]
+    check("上下篇 上<下<整话",
+          got.index("第3话上") < got.index("第3话下") < got.index("第3话"),
+          "→".join(got[4:8]))
+    check("排序方式按书记忆", STORE.book_order(bid_sort) == "part", STORE.book_order(bid_sort))
+    STORE.remove_book(bid_sort)
+    STORE.save_all()
 
     # ---------- 11. 其他页面 ----------
     win.switch(1)

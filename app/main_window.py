@@ -123,6 +123,7 @@ class MainWindow(FramelessWindow):
         self.book_page.rename_requested.connect(self.ask_rename_book)
         self.book_page.cover_requested.connect(self.ask_book_cover)
         self.book_page.changed.connect(self.shelf_page.refresh)
+        self.book_page.changed.connect(self._sync_edge_content)   # 排序变化后同步小窗话序
         self.book_page.toast.connect(self.toast)
 
         self.history_page.open_book.connect(self.open_chapter)
