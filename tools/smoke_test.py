@@ -129,6 +129,21 @@ def main() -> int:
     check("打开一话", view.total > 0, f"{pick['name']} · {view.total} 页")
     check("沉浸阅读（导航栏收起）", not win.rail.isVisible())
     check("页面解码", view.pixmap(0) is not None)
+    rp = win.reader_page
+    STORE.set_cfg("reader_ui.auto_hide_toolbar", True)
+    rp.btn_pin.setChecked(False)
+    rp.btn_pin.setText("固定")
+    rp._hide_timer.timeout.emit()
+    pump(0.4)
+    check("工具条隐藏后仍有把手", (not rp.bar.isVisible()) and rp.grip.isVisible(),
+          "「⌃ 工具栏」常驻底部")
+    rp.grip.click()
+    pump(0.4)
+    check("点把手可唤出并固定工具条",
+          rp.bar.isVisible() and rp.btn_pin.isChecked(), rp.btn_pin.text())
+    rp.btn_pin.click()
+    pump(0.3)
+    check("取消固定恢复自动隐藏", not rp.btn_pin.isChecked())
     view.set_fit("width")
     pump(1.0)
     lay = view.layout[0]
@@ -217,6 +232,13 @@ def main() -> int:
     pump(1.0)
     check("碰边滑出阅读窗", e.expanded and e.width() == e.peek_w() and e.card.isVisible(),
           f"w={e.width()}")
+    STORE.set_cfg("edge.coach_seen", False)     # 首次提示要在测试里稳定复现
+    check("小窗信息条常驻（不再自动消失）", e.bar.isVisible())
+    check("首次展开显示操作提示", e.coach.isVisible())
+    e._hide_coach()
+    pump(0.2)
+    check("操作提示可关闭并记住", (not e.coach.isVisible())
+          and bool(STORE.cfg("edge.coach_seen")), "edge.coach_seen")
     pump(10, lambda: e._cache.get(e._page) is not None)
     check("小窗内渲染页面", e.canvas._pm is not None,
           f"第 {e._page + 1} 页已解码")

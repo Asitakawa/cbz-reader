@@ -426,9 +426,13 @@ class ReaderPage(QWidget):
 
         self.bar = QFrame(self)
         self.bar.setObjectName("ReaderBar")
-        bl = QHBoxLayout(self.bar)
-        bl.setContentsMargins(10, 7, 10, 7)
-        bl.setSpacing(6)
+        bl = QVBoxLayout(self.bar)
+        bl.setContentsMargins(12, 7, 12, 8)
+        bl.setSpacing(5)
+        top = QHBoxLayout()
+        top.setSpacing(8)
+        bottom = QHBoxLayout()
+        bottom.setSpacing(6)
 
         self.btn_back = QPushButton("← 书架")
         self.lbl_title = QLabel("")
@@ -453,10 +457,59 @@ class ReaderPage(QWidget):
         self.btn_fs = QPushButton("⛶")
         self.btn_fs.setToolTip("全屏 (F11)")
 
-        for w in (self.btn_back, self.lbl_title, self.btn_mode, self.btn_fit, self.btn_rtl,
-                  self.btn_zo, self.lbl_zoom, self.btn_zi, self.slider, self.lbl_page,
-                  self.btn_camo, self.btn_fs):
-            bl.addWidget(w)
+        self.btn_pin = QPushButton("固定")
+        self.btn_pin.setCheckable(True)
+        self.btn_pin.setToolTip("固定工具栏，不再自动隐藏")
+        self.btn_pin.setCursor(Qt.PointingHandCursor)
+
+        bl.addLayout(top)
+        bl.addLayout(bottom)
+        top.addWidget(self.btn_back)
+        top.addWidget(self.lbl_title, 1)
+        top.addWidget(self.lbl_page)
+        top.addWidget(self.btn_pin)
+        top.addWidget(self.btn_camo)
+        top.addWidget(self.btn_fs)
+        sep = QFrame()
+        sep.setObjectName("BarSep")
+        sep.setFixedSize(1, 16)
+        bottom.addWidget(self.btn_mode)
+        bottom.addWidget(self.btn_fit)
+        bottom.addWidget(self.btn_rtl)
+        bottom.addSpacing(4)
+        bottom.addWidget(sep)
+        lbl_zoom_title = QLabel("缩放")
+        lbl_zoom_title.setObjectName("BarLabel")
+        bottom.addWidget(lbl_zoom_title)
+        bottom.addWidget(self.btn_zo)
+        bottom.addWidget(self.lbl_zoom)
+        bottom.addWidget(self.btn_zi)
+        bottom.addWidget(self.slider, 1)
+
+        for w, tip in (
+                (self.btn_back, "返回书详情（Esc）"),
+                (self.btn_mode, "连续滚动 / 单页翻页（M）"),
+                (self.btn_fit, "适配方式：宽 / 高 / 原始（0 恢复适配宽）"),
+                (self.btn_rtl, "阅读方向：左→右 / 右→左（R）"),
+                (self.btn_zo, "缩小（- 或 Ctrl+滚轮）"),
+                (self.btn_zi, "放大（+ 或 Ctrl+滚轮）"),
+                (self.slider, "拖动跳页"),
+                (self.lbl_page, "当前页 / 总页数"),
+                (self.btn_camo, "桌面伪装（Ctrl+Shift+X）"),
+                (self.btn_fs, "全屏（F11）"),
+        ):
+            w.setToolTip(tip)
+        self.lbl_title.setToolTip("书名 · 话名")
+        self.btn_pin.clicked.connect(self._toggle_pin)
+
+        # 工具条收起后常驻的小把手：告诉用户工具栏在哪里
+        self.grip = QPushButton("⌃  工具栏", self)
+        self.grip.setObjectName("BarGrip")
+        self.grip.setCursor(Qt.PointingHandCursor)
+        self.grip.setToolTip("显示工具栏（移动鼠标也会自动出现）")
+        self.grip.setFixedSize(96, 26)
+        self.grip.clicked.connect(self._show_toolbar_pinned)
+        self.grip.hide()
 
         self.badge = QLabel("", self)
         self.badge.setObjectName("PageBadge")
@@ -487,6 +540,10 @@ class ReaderPage(QWidget):
         self.btn_rtl.setChecked(self.view.rtl)
         self.btn_rtl.setText("右→左" if self.view.rtl else "左→右")
         self._sync_texts()
+        self.btn_pin.blockSignals(True)
+        self.btn_pin.setChecked(not bool(STORE.cfg("reader_ui.auto_hide_toolbar", True)))
+        self.btn_pin.setText("已固定" if self.btn_pin.isChecked() else "固定")
+        self.btn_pin.blockSignals(False)
         self.view.setFocus()
         self._flash()
         return ok
@@ -534,16 +591,42 @@ class ReaderPage(QWidget):
         self.badge.setText(f"{idx + 1} / {total}")
         self._sync_texts()
 
+    def _pinned(self) -> bool:
+        return self.btn_pin.isChecked()
+
     def _maybe_hide(self):
+        if self._pinned():
+            return
         if STORE.cfg("reader_ui.auto_hide_toolbar", True) and not self.bar.underMouse():
             self.bar.hide()
             self.badge.hide()
+            self.grip.show()
+            self.grip.raise_()
 
     def _flash(self):
         self.bar.show()
         self.badge.show()
+        self.grip.hide()
         self._relayout_overlays()
-        self._hide_timer.start(2600)
+        if not self._pinned():
+            self._hide_timer.start(2600)
+
+    def _toggle_pin(self):
+        pinned = self.btn_pin.isChecked()
+        self.btn_pin.setText("已固定" if pinned else "固定")
+        STORE.set_cfg("reader_ui.auto_hide_toolbar", not pinned)
+        STORE.save_config()
+        if pinned:
+            self._hide_timer.stop()
+            self.bar.show()
+            self.grip.hide()
+            self._relayout_overlays()
+        else:
+            self._hide_timer.start(1800)
+
+    def _show_toolbar_pinned(self):
+        self.btn_pin.setChecked(True)
+        self._toggle_pin()
 
     def mouseMoveEvent(self, e):
         self._flash()
@@ -558,8 +641,10 @@ class ReaderPage(QWidget):
         super().resizeEvent(e)
 
     def _relayout_overlays(self):
-        bw = min(self.width() - 40, self.bar.sizeHint().width() + 24)
-        self.bar.setGeometry((self.width() - bw) // 2, self.height() - 60, bw, 42)
+        bh = max(72, self.bar.sizeHint().height())
+        bw = min(self.width() - 40, max(520, self.bar.sizeHint().width() + 24))
+        self.bar.setGeometry((self.width() - bw) // 2, self.height() - bh - 18, bw, bh)
+        self.grip.move((self.width() - self.grip.width()) // 2, self.height() - 34)
         self.badge.adjustSize()
         self.badge.move(self.width() - self.badge.width() - 18, 14)
 

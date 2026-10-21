@@ -102,6 +102,11 @@ def mix(a: str, b: str, t: float) -> str:
     return _hex(tuple(ra[i] + (rb[i] - ra[i]) * t for i in range(3)))
 
 
+def rgba(hex_color: str, alpha: float) -> str:
+    r, g, b = _rgb(hex_color)
+    return f"rgba({r}, {g}, {b}, {int(max(0.0, min(1.0, alpha)) * 255)})"
+
+
 def luminance(hex_color: str) -> float:
     r, g, b = (c / 255 for c in _rgb(hex_color))
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
@@ -172,6 +177,7 @@ def _resolve() -> None:
     tok["overlay_text"] = "#F1EDE6"
     tok["overlay_sub"] = "#B9B3A8"
     tok["overlay_line"] = mix(t["overlay"], "#FFFFFF", 0.16)
+    tok["overlay_glass"] = rgba(t["overlay"], 0.78)
 
     r = _STATE["radius"]
     tok["r1"] = f"{max(4, r - 5)}px"
@@ -432,16 +438,23 @@ QToolTip { background: $overlay; color: $overlay_text; border: 1px solid $overla
 #ReaderBar { background: $overlay; border: 1px solid $overlay_line; border-radius: $r3; }
 #ReaderBar QPushButton {
     background: transparent; border: none; color: $overlay_text; font-size: $f12;
-    padding: 5px 9px; border-radius: $r1;
+    min-height: 20px; padding: 4px 9px; border-radius: $r1;
 }
 #ReaderBar QPushButton:hover { background: $overlay2; }
 #ReaderBar QPushButton:checked { background: $accent; color: $accent_text; }
 #ReaderBar QLabel { color: $overlay_sub; font-size: $f12; }
+#ReaderBar #BarLabel { color: $overlay_sub; font-size: $f11; }
+#BarSep { background: $overlay_line; }
 #ReaderBar QSlider::groove:horizontal { background: $overlay2; }
 #ReaderBar QSlider::sub-page:horizontal { background: $accent; }
 #ReaderBar QSlider::handle:horizontal { background: $overlay_text; border: 2px solid $accent; }
 #PageBadge { background: $overlay; color: $overlay_text; border-radius: $r2;
              padding: 4px 10px; font-size: $f12; }
+
+#BarGrip { background: $overlay_glass; color: $overlay_text;
+           border: 1px solid $overlay_line; border-radius: 13px;
+           font-size: $f11; padding: 0 10px; }
+#BarGrip:hover { background: $overlay; }
 
 #SegBox { background: $surface2; border: 1px solid $border; border-radius: $r2; }
 #SegBtn { background: transparent; border: none; color: $sub; font-size: $f12;

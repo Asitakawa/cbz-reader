@@ -255,12 +255,13 @@ class EdgePanel(QWidget):
         theme.style(self.lbl_page, "color:$overlay_sub;font-size:$f11;")
         self.btn_chapters = QPushButton("话数")
         self.btn_next_ch = QPushButton("下一话")
+        self.btn_help = QPushButton("?")
         self.btn_prev = QPushButton("‹")
         self.btn_next = QPushButton("›")
         self.btn_open = QPushButton("打开")
         self.btn_fold = QPushButton("收起")
         for b in (self.btn_chapters, self.btn_next_ch, self.btn_prev, self.btn_next,
-                  self.btn_open, self.btn_fold):
+                  self.btn_help, self.btn_open, self.btn_fold):
             b.setObjectName("MiniBtn")
             b.setCursor(Qt.PointingHandCursor)
             b.setFixedHeight(22)
@@ -268,18 +269,43 @@ class EdgePanel(QWidget):
         self.btn_next.setFixedWidth(24)
         self.btn_next_ch.setFixedWidth(56)
         self.btn_next_ch.hide()
+        self.btn_help.setFixedWidth(22)
+        self.btn_help.setToolTip("操作提示")
         top.addWidget(self.lbl_title, 1)
         bottom.addWidget(self.btn_chapters)
         bottom.addWidget(self.btn_next_ch)
         bottom.addWidget(self.btn_prev)
         bottom.addWidget(self.lbl_page)
         bottom.addWidget(self.btn_next)
+        bottom.addWidget(self.btn_help)
         bottom.addStretch(1)
         bottom.addWidget(self.btn_open)
         bottom.addWidget(self.btn_fold)
         bl.addLayout(top)
         bl.addLayout(bottom)
         self.bar.hide()
+
+        # 操作提示卡：第一次滑出时出现，之后可从「?」或右键再次查看
+        self.coach = QFrame(self)
+        self.coach.setObjectName("MiniCoach")
+        cl = QVBoxLayout(self.coach)
+        cl.setContentsMargins(12, 10, 12, 10)
+        cl.setSpacing(6)
+        ct = QLabel("这样操作")
+        ct.setObjectName("CoachTitle")
+        ctext = QLabel("滚轮 / 点页面左右两侧：翻页\n"
+                       "双击页面：回主窗口接着看\n"
+                       "「话数」切话 · 「下一话」跳下一话 · 右键更多")
+        ctext.setObjectName("CoachText")
+        ctext.setWordWrap(True)
+        cbtn = QPushButton("知道了")
+        cbtn.setObjectName("MiniBtn")
+        cbtn.setFixedHeight(24)
+        cbtn.clicked.connect(self._hide_coach)
+        cl.addWidget(ct)
+        cl.addWidget(ctext)
+        cl.addWidget(cbtn, 0, Qt.AlignRight)
+        self.coach.hide()
 
         # 空态：最近在读列表
         self.empty = QWidget(self)
@@ -297,6 +323,7 @@ class EdgePanel(QWidget):
 
         self.btn_chapters.clicked.connect(self._choose_chapter)
         self.btn_next_ch.clicked.connect(self._go_next_chapter)
+        self.btn_help.clicked.connect(lambda: self._show_coach(manual=True))
         self.btn_chapters.hide()
         self.btn_prev.clicked.connect(lambda: self.turn(-1))
         self.btn_next.clicked.connect(lambda: self.turn(1))
@@ -314,10 +341,10 @@ class EdgePanel(QWidget):
         self._poll = QTimer(self)
         self._poll.setInterval(120)
         self._poll.timeout.connect(self._tick)
-        self._bar_timer = QTimer(self)
-        self._bar_timer.setSingleShot(True)
-        self._bar_timer.setInterval(1800)
-        self._bar_timer.timeout.connect(self._hide_bar)
+        self._coach_timer = QTimer(self)
+        self._coach_timer.setSingleShot(True)
+        self._coach_timer.setInterval(9000)
+        self._coach_timer.timeout.connect(self._hide_coach)
 
         self._apply_style()
         theme.bus.changed.connect(self._apply_style)
@@ -377,6 +404,8 @@ class EdgePanel(QWidget):
         w, h = self.width(), self.height()
         self.card.setGeometry(0, 0, w, h)
         self.bar.setGeometry(8, h - BAR_H - 8, w - 16, BAR_H)
+        coach_h = int(104 * theme.current()["scale"])
+        self.coach.setGeometry(12, max(12, h - BAR_H - 18 - coach_h), w - 24, coach_h)
         self.empty.setGeometry(0, 0, w, h)
 
     def paintEvent(self, e):
@@ -408,12 +437,17 @@ class EdgePanel(QWidget):
             "border:none;border-radius:%(r1)s;font-size:%(f11)s;padding:0 7px;}"
             "#MiniBtn:hover{background:%(btn2)s;}"
             "#MiniBtn:disabled{background:%(btn)s;color:%(line)s;}"
+            "#MiniCoach{background:%(coach)s;border:1px solid %(line)s;"
+            "border-radius:%(r2)s;}"
+            "#CoachTitle{color:%(text)s;font-size:%(f11)s;font-weight:600;}"
+            "#CoachText{color:%(sub)s;font-size:%(f10)s;}"
             "#MiniBtnLeft{background:%(btn)s;color:%(sub)s;border:none;"
             "border-radius:%(r1)s;font-size:%(f10)s;text-align:left;padding:0 8px;}"
             "#MiniBtnLeft:hover{background:%(btn2)s;color:%(text)s;}"
             % {
                 "bg": theme.c("overlay"), "line": theme.c("overlay_line"),
                 "bar": theme.mix(theme.c("overlay"), "#000000", 0.18),
+                "coach": theme.mix(theme.c("overlay"), "#FFFFFF", 0.06),
                 "btn": theme.mix(theme.c("overlay"), "#FFFFFF", 0.09),
                 "btn2": theme.mix(theme.c("overlay"), "#FFFFFF", 0.18),
                 "text": theme.c("overlay_text"), "sub": theme.c("overlay_sub"),
@@ -443,7 +477,6 @@ class EdgePanel(QWidget):
         self.suspended = on
         if on:
             self._poll.stop()
-            self._bar_timer.stop()
             self.hide()
         else:
             self.start()
@@ -462,7 +495,9 @@ class EdgePanel(QWidget):
         self.empty.setVisible(not self._cid)
         self.canvas.setVisible(bool(self._cid))
         self._animate(self._geo_for(self.peek_w()))
-        self._bar_timer.start()
+        self._show_bar()
+        if not bool(STORE.cfg("edge.coach_seen", False)):
+            QTimer.singleShot(280, self._show_coach)
         if self._cid:
             self._load_page(self._page)
 
@@ -471,7 +506,8 @@ class EdgePanel(QWidget):
             return
         self.expanded = False
         self.bar.hide()
-        self._bar_timer.stop()
+        self.coach.hide()
+        self._coach_timer.stop()
         self._animate(self._geo_for(self.collapsed_w()))
         if self._cid:
             STORE.touch_history(self._cid, self._name, self._page, self._total)
@@ -723,16 +759,11 @@ class EdgePanel(QWidget):
             self.bar.setGeometry(8, h - BAR_H - 8, w - 16, BAR_H)
 
     # ================= 底部信息条 =================
-    def _hide_bar(self):
-        if not self.bar.underMouse():
-            self.bar.hide()
-
     def _show_bar(self):
         if not self.expanded:
             return
         self.bar.show()
         self._layout_children()
-        self._bar_timer.start()
 
     def enterEvent(self, e):
         self._show_bar()
@@ -746,6 +777,23 @@ class EdgePanel(QWidget):
     def mouseMoveEvent(self, e):
         self._show_bar()
         super().mouseMoveEvent(e)
+
+    def _show_coach(self, manual: bool = False):
+        if not self.expanded:
+            return
+        self.coach.show()
+        self.coach.raise_()
+        self._layout_children()
+        self._coach_timer.start()
+        if manual:
+            self._show_bar()
+
+    def _hide_coach(self):
+        self._coach_timer.stop()
+        self.coach.hide()
+        if not bool(STORE.cfg("edge.coach_seen", False)):
+            STORE.set_cfg("edge.coach_seen", True)
+            STORE.save_config()
 
     # ================= 边缘感应 =================
     def _tick(self):

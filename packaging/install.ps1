@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 $payload = Join-Path $PSScriptRoot 'CBZReader'
 $dest    = Join-Path $env:LOCALAPPDATA 'CBZReader'
 $exe     = Join-Path $dest 'CBZReader.exe'
-$version = '2.1.0'
+$version = '2.2.0'
 
 Write-Host ''
 Write-Host '  ====================================' -ForegroundColor Cyan
