@@ -259,26 +259,37 @@ def main() -> int:
         idx = e._chapter_index()
         nxt_ch = e.neighbor_chapter(1)
         if idx >= 0 and nxt_ch:
+            check("小窗有常驻「下一话」按钮",
+                  not e.btn_next_ch.isHidden() and e.btn_next_ch.isEnabled()
+                  and nxt_ch["name"] in e.btn_next_ch.toolTip(),
+                  e.btn_next_ch.toolTip())
+            e.btn_next_ch.click()          # 任意页都能直接跳到下一话
+            pump(1.2)
+            check("点「下一话」跳到下一话开头",
+                  e.current_chapter()["cid"] == nxt_ch["id"] and e._page == 0,
+                  f"→ {e._name} 第 {e._page + 1} 页")
+            # 末页继续往后翻也应自动接续
+            nxt2 = e.neighbor_chapter(1)
             total = e._total or 1
             e.set_progress(total - 1, total)
             pump(0.4)
-            label = e.btn_next.text()
             e.turn(1)
-            pump(1.0)
-            check("小窗末页接续下一话",
-                  e.current_chapter()["cid"] == nxt_ch["id"] and e._page == 0,
-                  f"按钮「{label}」→ {e._name} 第 {e._page + 1} 页")
+            pump(1.2)
+            if nxt2:
+                check("小窗末页继续翻→下一话",
+                      e.current_chapter()["cid"] == nxt2["id"] and e._page == 0,
+                      f"→ {e._name} 第 {e._page + 1} 页")
+            # 首页往前翻回上一话末页
             prv_ch = e.neighbor_chapter(-1)
             e.set_progress(0, e._total or 1)
             pump(0.3)
-            label_prev = e.btn_prev.text()
             if prv_ch:
                 e.turn(-1)
                 pump(1.0)
-                check("小窗首页回退上一话",
+                check("小窗首页继续翻→上一话末页",
                       e.current_chapter()["cid"] == prv_ch["id"]
                       and e._page == max(0, (e._total or 1) - 1),
-                      f"按钮「{label_prev}」→ {e._name} 第 {e._page + 1}/{e._total} 页")
+                      f"→ {e._name} 第 {e._page + 1}/{e._total} 页")
     e._tick()                     # 模拟光标已离开（无延迟，应立刻缩回）
     pump(0.5)
     check("鼠标离开立即缩回细缝",

@@ -141,7 +141,7 @@ cbz-reader/
 │   ├── theme.py            主题引擎（6 套主题 × 强调色 × 圆角 × 字号 → QSS token）
 │   └── imgutil.py          Pillow → QImage
 ├── tools/
-│   ├── smoke_test.py       无头回归测试（64 项断言）
+│   ├── smoke_test.py       无头回归测试（66 项断言）
 │   ├── render_preview.py   真机截图预览
 │   └── make_icon.py        生成 assets/icon.ico 与 PNG
 ├── packaging/

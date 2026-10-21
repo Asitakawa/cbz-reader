@@ -254,19 +254,23 @@ class EdgePanel(QWidget):
         self.lbl_page = QLabel("0 / 0")
         theme.style(self.lbl_page, "color:$overlay_sub;font-size:$f11;")
         self.btn_chapters = QPushButton("话数")
+        self.btn_next_ch = QPushButton("下一话")
         self.btn_prev = QPushButton("‹")
         self.btn_next = QPushButton("›")
         self.btn_open = QPushButton("打开")
         self.btn_fold = QPushButton("收起")
-        for b in (self.btn_chapters, self.btn_prev, self.btn_next,
+        for b in (self.btn_chapters, self.btn_next_ch, self.btn_prev, self.btn_next,
                   self.btn_open, self.btn_fold):
             b.setObjectName("MiniBtn")
             b.setCursor(Qt.PointingHandCursor)
             b.setFixedHeight(22)
         self.btn_prev.setFixedWidth(24)
         self.btn_next.setFixedWidth(24)
+        self.btn_next_ch.setFixedWidth(56)
+        self.btn_next_ch.hide()
         top.addWidget(self.lbl_title, 1)
         bottom.addWidget(self.btn_chapters)
+        bottom.addWidget(self.btn_next_ch)
         bottom.addWidget(self.btn_prev)
         bottom.addWidget(self.lbl_page)
         bottom.addWidget(self.btn_next)
@@ -292,6 +296,7 @@ class EdgePanel(QWidget):
         self.empty.hide()
 
         self.btn_chapters.clicked.connect(self._choose_chapter)
+        self.btn_next_ch.clicked.connect(self._go_next_chapter)
         self.btn_chapters.hide()
         self.btn_prev.clicked.connect(lambda: self.turn(-1))
         self.btn_next.clicked.connect(lambda: self.turn(1))
@@ -402,6 +407,7 @@ class EdgePanel(QWidget):
             "#MiniBtn{background:%(btn)s;color:%(text)s;"
             "border:none;border-radius:%(r1)s;font-size:%(f11)s;padding:0 7px;}"
             "#MiniBtn:hover{background:%(btn2)s;}"
+            "#MiniBtn:disabled{background:%(btn)s;color:%(line)s;}"
             "#MiniBtnLeft{background:%(btn)s;color:%(sub)s;border:none;"
             "border-radius:%(r1)s;font-size:%(f10)s;text-align:left;padding:0 8px;}"
             "#MiniBtnLeft:hover{background:%(btn2)s;color:%(text)s;}"
@@ -551,6 +557,11 @@ class EdgePanel(QWidget):
         j = i + step
         return self._chapters[j] if 0 <= j < len(self._chapters) else None
 
+    def _go_next_chapter(self):
+        nxt = self.neighbor_chapter(1)
+        if nxt:
+            self._switch_chapter(nxt["id"], page=0)
+
     def _choose_chapter(self):
         if not self._chapters:
             return
@@ -596,19 +607,17 @@ class EdgePanel(QWidget):
         self._fit_title()
 
     def _sync_nav_buttons(self):
-        nxt, prv = self.neighbor_chapter(1), self.neighbor_chapter(-1)
-        at_end = bool(self._total) and self._page >= self._total - 1
-        at_start = self._page <= 0
-        nx = bool(at_end and nxt)
-        pv = bool(at_start and prv)
-        self.btn_next.setText("下一话" if nx else "›")
-        self.btn_next.setFixedWidth(52 if nx else 24)
-        self.btn_next.setToolTip(
-            f"下一话 · {nxt.get('name', '')}" if nx else "下一页（滚轮 / 点击右侧）")
-        self.btn_prev.setText("上一话" if pv else "‹")
-        self.btn_prev.setFixedWidth(52 if pv else 24)
-        self.btn_prev.setToolTip(
-            f"上一话 · {prv.get('name', '')}" if pv else "上一页（滚轮 / 点击左侧）")
+        nxt = self.neighbor_chapter(1)
+        self.btn_next.setText("›")
+        self.btn_next.setFixedWidth(24)
+        self.btn_next.setToolTip("下一页（滚轮 / 点击右侧；末页继续则进入下一话）")
+        self.btn_prev.setText("‹")
+        self.btn_prev.setFixedWidth(24)
+        self.btn_prev.setToolTip("上一页（首页继续则回到上一话末页）")
+        self.btn_next_ch.setVisible(len(self._chapters) > 1)
+        self.btn_next_ch.setEnabled(bool(nxt))
+        self.btn_next_ch.setToolTip(
+            f"下一话 · {nxt.get('name', '')}" if nxt else "已经是最后一话")
 
     def _fit_title(self):
         head = f"{self._book} · {self._name}" if self._book else self._name
