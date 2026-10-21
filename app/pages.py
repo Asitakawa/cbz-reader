@@ -281,6 +281,7 @@ class SettingsPage(QWidget):
     hotkey_changed = Signal(str, str)
     opacity_changed = Signal(float)
     edge_changed = Signal(dict)
+    close_action_changed = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__()
@@ -402,9 +403,21 @@ class SettingsPage(QWidget):
         self.sld_op.valueChanged.connect(self._save_opacity)
         row.addWidget(self.sld_op)
         row.addWidget(self.lbl_op)
+        row.addSpacing(18)
+        row.addWidget(self._lbl("关闭窗口时"))
+        self.cmb_close = QComboBox()
+        self.cmb_close.addItem("每次询问", "ask")
+        self.cmb_close.addItem("关闭软件", "quit")
+        self.cmb_close.addItem("最小化到托盘", "tray")
+        self.cmb_close.setCurrentIndex(
+            {"ask": 0, "quit": 1, "tray": 2}.get(STORE.cfg("window.close_action", "ask"), 0))
+        self.cmb_close.currentIndexChanged.connect(
+            lambda i: self.close_action_changed.emit(self.cmb_close.currentData()))
+        row.addWidget(self.cmb_close)
         row.addStretch(1)
         b4.addLayout(row)
-        b4.addWidget(self._hint("按住窗口任意边缘可自由缩放；拖住标题栏任意位置可移动；双击标题栏最大化。"))
+        b4.addWidget(self._hint("按住窗口任意边缘可自由缩放；拖住标题栏任意位置可移动；双击标题栏最大化。"
+                                "「关闭窗口时」可选每次询问、直接退出、或最小化到托盘继续后台运行。"))
 
         # ---- 屏幕边缘小窗 ----
         _g6, b6 = self._group(lay, "边缘迷你阅读器")
@@ -595,3 +608,8 @@ class SettingsPage(QWidget):
         self.cmb_edge_shape.blockSignals(True)
         self.cmb_edge_shape.setCurrentIndex(0 if STORE.cfg("edge.shape", "sliver") == "sliver" else 1)
         self.cmb_edge_shape.blockSignals(False)
+        if hasattr(self, "cmb_close"):
+            self.cmb_close.blockSignals(True)
+            self.cmb_close.setCurrentIndex(
+                {"ask": 0, "quit": 1, "tray": 2}.get(STORE.cfg("window.close_action", "ask"), 0))
+            self.cmb_close.blockSignals(False)

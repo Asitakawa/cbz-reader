@@ -8,8 +8,9 @@ from __future__ import annotations
 from PySide6.QtCore import (QAbstractAnimation, QEasingCurve, QPoint,
                             QPropertyAnimation, QRect, QSize, Qt, QTimer, Signal)
 from PySide6.QtGui import QColor, QCursor, QGuiApplication, QPainter, QPixmap
-from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QListWidget,
+                               QListWidgetItem, QMenu, QPushButton, QVBoxLayout,
+                               QWidget)
 
 from .store import STORE
 from .tasks import ASYNC
@@ -107,6 +108,53 @@ class _Canvas(QWidget):
         e.accept()
 
 
+class _ChapterPicker(QWidget):
+    """选择话数的弹出列表（贴在迷你阅读器内部）。"""
+
+    picked = Signal(str)
+
+    def __init__(self, chapters: list[dict], current: str, width: int):
+        super().__init__(None, Qt.Popup | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setFixedWidth(width)
+        h = min(400, 46 + max(1, len(chapters)) * 26)
+        self.setFixedHeight(h)
+
+        card = QFrame(self)
+        card.setObjectName("PickerCard")
+        card.setGeometry(0, 0, width, h)
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setSpacing(6)
+        t = QLabel(f"共 {len(chapters)} 话")
+        t.setObjectName("PickerTitle")
+        lay.addWidget(t)
+        self.list = QListWidget()
+        self.list.setObjectName("PickerList")
+        self.list.setFrameShape(QFrame.NoFrame)
+        for i, ch in enumerate(chapters, 1):
+            it = QListWidgetItem(f"{i}. {ch.get('name', '')}")
+            it.setData(Qt.UserRole, ch.get("id", ""))
+            self.list.addItem(it)
+            if ch.get("id") == current:
+                self.list.setCurrentItem(it)
+                self.list.scrollToItem(it)
+        lay.addWidget(self.list, 1)
+        self.list.itemClicked.connect(self._pick)
+        self.list.itemActivated.connect(self._pick)
+        self.setStyleSheet(
+            "#PickerCard{background:#15181D;border:1px solid #2A2F38;border-radius:10px;}"
+            "#PickerTitle{color:#8B93A1;font-size:10px;}"
+            "#PickerList{background:transparent;color:#E8EBF0;font-size:12px;border:none;}"
+            "#PickerList::item{padding:4px 6px;border-radius:6px;}"
+            "#PickerList::item:selected{background:#2A3550;color:#FFFFFF;}"
+            "#PickerList::item:hover{background:#222833;}")
+
+    def _pick(self, item):
+        self.picked.emit(item.data(Qt.UserRole))
+        self.close()
+
+
 class EdgePanel(QWidget):
     """贴边迷你阅读器。"""
 
@@ -130,6 +178,8 @@ class EdgePanel(QWidget):
         self.pinned = False          # 钉住：不自动缩回（截图/调试用）
 
         self.width_target = int(STORE.cfg("edge.width", PEEK_W) or PEEK_W)
+        self._page_h = 0            # 面板高度跟随当前页比例
+        self._chapters: list[dict] = []
         self._cid = ""
         self._path = ""
         self._name = ""
@@ -165,17 +215,20 @@ class EdgePanel(QWidget):
         self.lbl_title.setStyleSheet("color:#EDEFF3;font-size:11px;font-weight:600;")
         self.lbl_page = QLabel("0 / 0")
         self.lbl_page.setStyleSheet("color:#B9C0CC;font-size:11px;")
+        self.btn_chapters = QPushButton("话数")
         self.btn_prev = QPushButton("‹")
         self.btn_next = QPushButton("›")
         self.btn_open = QPushButton("打开")
         self.btn_fold = QPushButton("收起")
-        for b in (self.btn_prev, self.btn_next, self.btn_open, self.btn_fold):
+        for b in (self.btn_chapters, self.btn_prev, self.btn_next,
+                  self.btn_open, self.btn_fold):
             b.setObjectName("MiniBtn")
             b.setCursor(Qt.PointingHandCursor)
             b.setFixedHeight(22)
         self.btn_prev.setFixedWidth(24)
         self.btn_next.setFixedWidth(24)
         bl.addWidget(self.lbl_title, 1)
+        bl.addWidget(self.btn_chapters)
         bl.addWidget(self.btn_prev)
         bl.addWidget(self.lbl_page)
         bl.addWidget(self.btn_next)
@@ -197,6 +250,8 @@ class EdgePanel(QWidget):
         el.addStretch(1)
         self.empty.hide()
 
+        self.btn_chapters.clicked.connect(self._choose_chapter)
+        self.btn_chapters.hide()
         self.btn_prev.clicked.connect(lambda: self.turn(-1))
         self.btn_next.clicked.connect(lambda: self.turn(1))
         self.btn_open.clicked.connect(self.open_in_main)
@@ -244,6 +299,7 @@ class EdgePanel(QWidget):
         self._cache.clear()
         self._pending.clear()
         if self.expanded:
+            self._page_h = 0
             self._animate(self._geo_for(target))
             self._load_page(self._page, force=True)
         self._layout_children()
@@ -260,7 +316,7 @@ class EdgePanel(QWidget):
 
     def _geo_for(self, width: int) -> QRect:
         scr = self._screen()
-        h = self.peek_h()
+        h = self._page_h or self.peek_h()
         y = scr.y() + max(0, (scr.height() - h) // 2)
         x = scr.x() + scr.width() - width if self.side == "right" else scr.x()
         return QRect(x, y, width, h)
@@ -418,6 +474,45 @@ class EdgePanel(QWidget):
         if self.expanded:
             self._load_page(self._page)
 
+    def set_chapters(self, chapters: list[dict], current: str = ""):
+        """主窗口同步当前书的全部话数，供小窗内切换。"""
+        self._chapters = list(chapters or [])
+        self.btn_chapters.setVisible(len(self._chapters) > 1)
+
+    def _choose_chapter(self):
+        if not self._chapters:
+            return
+        w = max(200, min(320, self.width() - 24))
+        picker = _ChapterPicker(self._chapters, self._cid, w)
+        picker.picked.connect(self._switch_chapter)
+        bw = self.bar.width()
+        px = self.bar.x() + (8 if self.side == "left" else bw - w - 8)
+        py = self.bar.y() - picker.height() - 6
+        picker.move(self.mapToGlobal(QPoint(max(8, px), max(8, py))))
+        picker.show()
+        self._picker = picker
+
+    def _switch_chapter(self, cid: str):
+        ch = next((c for c in self._chapters if c.get("id") == cid), None)
+        if not ch:
+            return
+        total = int((STORE.progress(cid) or {}).get("total", 0) or 0)
+        if not total:
+            try:
+                from .cbr import ComicSource
+                src = ComicSource(ch.get("path", ""))
+                total = src.page_count
+                src.close()
+            except Exception:
+                total = 0
+        page = int((STORE.progress(cid) or {}).get("page", 0) or 0)
+        book = (STORE.book(ch.get("book", "")) or {}).get("title", "")
+        self.set_chapter(ch.get("path", ""), ch.get("name", ""), cid, book, page, total)
+        STORE.touch_history(cid, ch.get("name", ""), page, total)
+        STORE.save_all()
+        self.progress_changed.emit(cid, page, total)
+        self._show_bar()
+
     def _sync_page_label(self):
         self.lbl_page.setText(
             f"{self._page + 1} / {self._total}" if self._total else "—")
@@ -489,6 +584,25 @@ class EdgePanel(QWidget):
             self._cache.pop(far, None)
         if index == self._page:
             self.canvas.set_pixmap(pm)
+            self._fit_to_page(pm)
+
+    def _fit_to_page(self, pm: QPixmap):
+        """让面板高度贴合当前页比例，避免上下留黑边。"""
+        if pm is None or pm.isNull() or pm.width() <= 0:
+            return
+        scr = self._screen()
+        ratio = pm.height() / pm.width()
+        h = int(self.peek_w() * ratio)
+        h = max(140, min(h, int(scr.height() * 0.94)))
+        if abs(h - self._page_h) <= 2:
+            return
+        self._page_h = h
+        if self.expanded:
+            w = self.peek_w()          # 用目标宽度，避免动画中途把宽度定小
+            y = scr.y() + max(0, (scr.height() - h) // 2)
+            x = scr.x() + scr.width() - w if self.side == "right" else scr.x()
+            self._animate(QRect(x, y, w, h))
+            self.bar.setGeometry(8, h - BAR_H - 8, w - 16, BAR_H)
 
     # ================= 底部信息条 =================
     def _hide_bar(self):

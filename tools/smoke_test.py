@@ -127,6 +127,12 @@ def main() -> int:
     pump(15, lambda: view.pixmap(0) is not None)
     check("打开一话", view.total > 0, f"{pick['name']} · {view.total} 页")
     check("页面解码", view.pixmap(0) is not None)
+    view.set_fit("width")
+    pump(1.0)
+    lay = view.layout[0]
+    check("阅读器无冗余边距",
+          abs(lay[0]) <= 1 and abs(lay[1]) <= 1 and abs(lay[2] - view.width()) <= 1,
+          f"x={lay[0]:.0f} y={lay[1]:.0f} 页宽={lay[2]:.0f} 视口={view.width()} gap={view.gap}")
     win.grab().save(str(SHOTS / "13_reader.png"))
 
     view.set_page(min(4, view.total - 1), animate=False)
@@ -194,6 +200,7 @@ def main() -> int:
     scr = e.screen().availableGeometry()
     r_edge = scr.x() + scr.width()
     e.set_shape("sliver")            # 归一化到细缝，避免受上次运行残留影响
+    e.width_target = 420             # 归一化宽度
     pump(0.8)
     check("细缝贴边隐藏",
           e.isVisible() and abs(e.x() + e.width() - r_edge) <= 1
@@ -204,7 +211,7 @@ def main() -> int:
     e._poll.stop()                       # 测试期间关闭「离开自动收起」，避免光标不在边上
     e.expand()
     pump(1.0)
-    check("碰边滑出阅读窗", e.expanded and e.width() == 420 and e.card.isVisible(),
+    check("碰边滑出阅读窗", e.expanded and e.width() == e.peek_w() and e.card.isVisible(),
           f"w={e.width()}")
     pump(10, lambda: e._cache.get(e._page) is not None)
     check("小窗内渲染页面", e.canvas._pm is not None,
@@ -217,20 +224,37 @@ def main() -> int:
     cid_now = e.current_chapter()["cid"]
     check("翻页写回阅读进度",
           int((STORE.progress(cid_now) or {}).get("page", -1)) == e._page)
+    bid_now = (STORE.chapter(e.current_chapter().get("cid", "")) or {}).get("book", "")
+    chs_now = STORE.chapters_of(bid_now)
+    e.set_chapters(chs_now, e.current_chapter()["cid"])
+    pump(0.3)
+    check("小窗有「话」按钮（可切话）", not e.btn_chapters.isHidden(), f"{len(chs_now)} 话")
+    other = next((c for c in chs_now if c["id"] != e.current_chapter()["cid"]), None)
+    if other:
+        e._switch_chapter(other["id"])
+        pump(1.2)
+        pump(10, lambda: e._cache.get(e._page) is not None)
+        check("小窗内切换话数", e.current_chapter()["cid"] == other["id"],
+              f"→ {other['name']} {e.lbl_page.text()}")
+        pm_sw = e._cache.get(e._page)
+        if pm_sw is not None and pm_sw.width() > 0:
+            expect_h = int(e.peek_w() * pm_sw.height() / pm_sw.width())
+            check("小窗高度贴合图片比例", abs(e.height() - expect_h) <= 4,
+                  f"窗 {e.width()}x{e.height()} 期望高 {expect_h}")
     e._tick()                     # 模拟光标已离开（无延迟，应立刻缩回）
     pump(0.5)
     check("鼠标离开立即缩回细缝",
           not e.expanded and e.width() == 6 and not e.card.isVisible(), f"w={e.width()}")
     e.expand()
-    pump(0.6)
-    w0 = e.width()
+    pump(1.2)
+    w0 = e.width_target
     e.canvas.zoomed.emit(1)       # Ctrl+滚轮
     pump(0.8)
-    zoomed_ok = e.width() == w0 + 40
+    zoomed_ok = e.width_target == w0 + 40 and abs(e.width() - (w0 + 40)) <= 2
     e.canvas.zoomed.emit(-1)
     pump(0.8)
-    check("Ctrl+滚轮调整阅读窗大小", zoomed_ok and e.width() == w0,
-          f"{w0} → {w0 + 40} → {e.width()}")
+    check("Ctrl+滚轮调整阅读窗大小", zoomed_ok and e.width_target == w0,
+          f"{w0} → {w0 + 40} → {e.width_target}")
     e._tick()
     pump(0.4)
     e.set_shape("strip")
@@ -271,6 +295,16 @@ def main() -> int:
     pump(0.8)
     check("热键隐藏时迷你阅读器一起藏起",
           hidden and edge_hidden and win.isVisible() and e.isVisible())
+    STORE.set_cfg("window.close_action", "tray")
+    win.close()
+    pump(0.8)
+    closed_hidden = not win.isVisible()
+    win.show_window()
+    pump(0.6)
+    STORE.set_cfg("window.close_action", "ask")
+    check("关闭窗口→最小化到托盘（软件仍在运行）",
+          closed_hidden and win.isVisible())
+
     win.toggle_fullscreen()
     pump(0.4)
     fs = win._full

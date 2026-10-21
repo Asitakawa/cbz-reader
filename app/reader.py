@@ -10,7 +10,7 @@ from .cbr import Cbz
 from .store import STORE
 from .tasks import ASYNC
 
-PAD = 12
+PAD = 0          # 页面四周不留白：图片有多大就铺多大
 CACHE_MAX = 20
 MAX_DECODE_W = 2400
 MAX_DECODE_H = 3400
@@ -42,7 +42,7 @@ class ReaderView(QWidget):
         self.zoom = float(r.get("zoom", 1.0) or 1.0)
         self.rtl = bool(r.get("rtl", False))
         self.bg = r.get("bg", "#101216")
-        self.gap = int(r.get("gap", 10))
+        self.gap = int(r.get("gap", 0))
 
         self._scroll = 0.0
         self._content_h = 0.0
@@ -89,9 +89,10 @@ class ReaderView(QWidget):
             return max(0.02, 1.0 * self.zoom)
         if self.mode == "single":
             return max(0.02, min(aw / max(1, w), ah / max(1, h)) * self.zoom)
+        # 逐页按自身宽/高缩放：图片多宽就铺多宽，不留左右/上下冗余边框
         if self.fit == "height":
-            return max(0.02, ah / max(1, max(x[1] for x in self.sizes)) * self.zoom)
-        return max(0.02, aw / max(1, max(x[0] for x in self.sizes)) * self.zoom)
+            return max(0.02, ah / max(1, h) * self.zoom)
+        return max(0.02, aw / max(1, w) * self.zoom)
 
     def relayout(self):
         vw, vh = self.width(), self.height()

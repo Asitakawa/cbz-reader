@@ -40,7 +40,7 @@ DEFAULTS = {
         "zoom": 1.0,
         "rtl": False,            # True = 日漫从右往左
         "bg": "#101216",
-        "gap": 10,
+        "gap": 0,       # 页间距（0 = 无冗余边框）
     },
     "window": {"w": 1200, "h": 780, "x": None, "y": None, "opacity": 1.0},
     "import": {"on_conflict": "skip"},   # skip | overwrite | rename

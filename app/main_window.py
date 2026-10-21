@@ -7,10 +7,10 @@ from pathlib import Path
 
 from PySide6.QtCore import QPoint, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QHBoxLayout,
-                               QLabel, QMenu, QMessageBox, QProgressDialog,
-                               QPushButton, QStackedWidget, QSystemTrayIcon,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QCheckBox, QFileDialog, QFrame,
+                               QHBoxLayout, QLabel, QMenu, QMessageBox,
+                               QProgressDialog, QPushButton, QStackedWidget,
+                               QSystemTrayIcon, QVBoxLayout, QWidget)
 
 from .book import BookDetailPage
 from .camo import CamoOverlay
@@ -131,6 +131,7 @@ class MainWindow(FramelessWindow):
         self.settings_page.hotkey_changed.connect(self._on_hotkey_changed)
         self.settings_page.opacity_changed.connect(self.set_window_opacity)
         self.settings_page.edge_changed.connect(self._on_edge_changed)
+        self.settings_page.close_action_changed.connect(self._on_close_action_changed)
         self.reader_page.back_requested.connect(self.back_from_reader)
         self.reader_page.camo_requested.connect(self.toggle_camo)
         self.reader_page.fullscreen_requested.connect(self.toggle_fullscreen)
@@ -552,20 +553,26 @@ class MainWindow(FramelessWindow):
 
     # ================= 边缘迷你阅读器 =================
     def _sync_edge_content(self, recent_only: bool = False):
+        bid, cid = "", ""
         if self._cur:
             view = self.reader_page.view
-            self.edge.set_chapter(self._cur["path"], self._cur["name"], self._cur["cid"],
+            cid = self._cur["cid"]
+            self.edge.set_chapter(self._cur["path"], self._cur["name"], cid,
                                   self._cur.get("title", ""), view.current, view.total)
         else:
             recent = STORE.recent_chapters(1)
             if recent:
                 h = recent[0]
-                self.edge.set_chapter(h["path"], h["name"], h.get("key", ""),
+                cid = h.get("key", "")
+                self.edge.set_chapter(h["path"], h["name"], cid,
                                       h.get("book_title", ""),
                                       int(h.get("page", 0) or 0),
                                       int(h.get("total", 0) or 0))
             else:
                 self.edge.set_chapter("", "", "", "", 0, 0)
+        if cid:
+            bid = (STORE.chapter(cid) or {}).get("book", "")
+        self.edge.set_chapters(STORE.chapters_of(bid) if bid else [], cid)
         self.edge.set_recent_list(STORE.recent_chapters(4))
 
     def _open_mini_in_main(self):
@@ -600,6 +607,11 @@ class MainWindow(FramelessWindow):
             self.a_edge.setChecked(enabled)
             self.a_edge.blockSignals(False)
         self.settings_page.refresh()
+
+    def _on_close_action_changed(self, action: str):
+        STORE.set_cfg("window.close_action", action)
+        STORE.save_config()
+        self.toast("关闭窗口的行为已更新")
 
     def _on_edge_changed(self, cfg: dict):
         if "side" in cfg:
@@ -672,14 +684,7 @@ class MainWindow(FramelessWindow):
 
     def toggle_hide(self):
         if self.isVisible() and not self.isMinimized():
-            self._flush_history()
-            self._hidden = True
-            self.edge.collapse()
-            self.hide()
-            self._sync_edge()          # 主窗口隐藏时，边缘迷你阅读器一起藏起来
-            if self.tray.supportsMessages():
-                self.tray.showMessage("CBZ 阅读器", "窗口已隐藏，按热键恢复",
-                                      QSystemTrayIcon.Information, 1500)
+            self.hide_to_tray()        # 主窗口隐藏时，边缘迷你阅读器一起藏起来
         else:
             self.show_window()
 
@@ -704,6 +709,38 @@ class MainWindow(FramelessWindow):
                 self.setGeometry(self._geo_before_full)
         self.reader_page.set_fullscreen(self._full)
         self._sync_edge()
+
+    def _ask_close_action(self) -> str:
+        """返回 quit / tray / ""（取消）。"""
+        box = QMessageBox(self)
+        box.setWindowTitle("关闭 CBZ 阅读器")
+        box.setIcon(QMessageBox.Question)
+        box.setText("你要关闭软件，还是最小化到托盘继续在后台运行？")
+        b_quit = box.addButton("关闭软件", QMessageBox.DestructiveRole)
+        b_tray = box.addButton("最小化到托盘", QMessageBox.AcceptRole)
+        b_cancel = box.addButton("取消", QMessageBox.RejectRole)
+        chk = QCheckBox("记住我的选择（可在「设置」中修改）")
+        box.setCheckBox(chk)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is None or clicked is b_cancel:
+            return ""
+        action = "quit" if clicked is b_quit else "tray"
+        if chk.isChecked():
+            STORE.set_cfg("window.close_action", action)
+            STORE.save_config()
+            self.settings_page.refresh()
+        return action
+
+    def hide_to_tray(self):
+        self._flush_history()
+        self._hidden = True
+        self.edge.collapse()
+        self.hide()
+        self._sync_edge()
+        if self.tray.supportsMessages():
+            self.tray.showMessage("CBZ 阅读器", "已最小化到托盘，按 Ctrl+` 或点托盘图标唤回",
+                                  QSystemTrayIcon.Information, 1800)
 
     def quit_app(self):
         self._flush_history()
@@ -767,6 +804,16 @@ class MainWindow(FramelessWindow):
         e.accept()
 
     def closeEvent(self, e):
+        action = str(STORE.cfg("window.close_action", "ask") or "ask")
+        if action == "ask":
+            action = self._ask_close_action()
+            if not action:
+                e.ignore()
+                return
+        if action == "tray":
+            e.ignore()
+            self.hide_to_tray()
+            return
         self._flush_history()
         self.hotkeys.stop()
         STORE.set_cfg("window", self.geo_dict())
