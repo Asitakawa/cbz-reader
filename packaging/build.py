@@ -121,7 +121,8 @@ def verify_frozen(app_dir: Path) -> bool:
         print("  " + line)
     ok = "result      : PASS" in text
     print("  自检结论：" + ("PASS" if ok else "FAIL"))
-    shutil.rmtree(app_dir / "data", ignore_errors=True)   # 不外带本机书架数据
+    for junk in ("data", "cache", "library"):     # 不外带本机数据与缓存
+        shutil.rmtree(app_dir / junk, ignore_errors=True)
     return ok
 
 
