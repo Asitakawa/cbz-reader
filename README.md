@@ -155,7 +155,7 @@ cbz-reader/
 │   └── imgutil.py          Pillow → QImage
 ├── tools/
 │   ├── smoke_test.py       无头回归测试（74 项断言）
-│   ├── robust_test.py      稳健性测试（35 项：坏文件 / 数据边界 / 主题矩阵 / 布局极值 / 性能）
+│   ├── robust_test.py      稳健性测试（40 项：坏文件 / 数据边界 / 主题矩阵 / 布局极值 / 性能）
 │   ├── render_preview.py   真机截图预览
 │   └── make_icon.py        生成 assets/icon.ico 与 PNG
 ├── packaging/
@@ -175,6 +175,8 @@ cbz-reader/
 ```bash
 python tools/smoke_test.py     # 无头回归（书→话模型 / 导入 / 解码 / 翻页 / 伪装 / 热键 / 边缘小窗 / 个性化主题 / 拖动缩放）
 python tools/robust_test.py    # 稳健性（损坏 cbz / 空包 / 坏页 / 数据边界 / 576 组主题 / 极值布局 / 性能）
+
+最近一次完整测试：**114 项断言全部通过**（回归 74 + 稳健 40），详见 [测试报告](docs/test-report-2.4.1.md)。
 python tools/render_preview.py # 真机渲染截图（输出到 cache/_preview/）
 ```
 

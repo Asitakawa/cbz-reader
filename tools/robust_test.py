@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from PIL import Image                                  # noqa: E402
+from PySide6.QtCore import QCoreApplication, QEvent     # noqa: E402
 from PySide6.QtWidgets import QApplication, QFrame     # noqa: E402
 
 from app import theme                                  # noqa: E402
@@ -46,10 +47,13 @@ def _teardown(win: MainWindow):
 
 
 def pump(seconds: float = 0.25):
+    """注意：processEvents() 不处理 deleteLater()，必须显式派发 DeferredDelete，
+    否则控件被反复重建时会误判为内存泄漏。"""
     app = QApplication.instance()
     end = time.time() + seconds
     while time.time() < end:
         app.processEvents()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
         time.sleep(0.01)
 
 
@@ -393,9 +397,113 @@ def test_perf():
     _teardown(win)
 
 
-# ================================================================ 6. 源码卫生
+# ================================================================ 6. 首启与资源释放
+def _rss_mb() -> float:
+    if os.name != "nt":
+        return 0.0
+    import ctypes
+    from ctypes import wintypes
+
+    class PMC(ctypes.Structure):
+        _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD),
+                    ("PeakWorkingSetSize", ctypes.c_size_t),
+                    ("WorkingSetSize", ctypes.c_size_t),
+                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                    ("PagefileUsage", ctypes.c_size_t),
+                    ("PeakPagefileUsage", ctypes.c_size_t)]
+    pmc = PMC()
+    pmc.cb = ctypes.sizeof(pmc)
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.GetCurrentProcess.restype = wintypes.HANDLE
+    fn = k32.K32GetProcessMemoryInfo
+    fn.argtypes = [wintypes.HANDLE, ctypes.POINTER(PMC), wintypes.DWORD]
+    fn.restype = wintypes.BOOL
+    if fn(k32.GetCurrentProcess(), ctypes.byref(pmc), pmc.cb):
+        return pmc.WorkingSetSize / 1048576
+    return 0.0
+
+
+def test_fresh_install():
+    """把 app 复制到空目录运行：模拟全新安装（无 books/history/config）。"""
+    print("\n=== 6. 全新安装首启 ===")
+    import subprocess
+    fresh = WORK / "fresh"
+    shutil.rmtree(fresh, ignore_errors=True)
+    fresh.mkdir(parents=True)
+    shutil.copytree(ROOT / "app", fresh / "app",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    code = """
+import sys, os
+sys.path.insert(0, r"%s")
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+from PySide6.QtWidgets import QApplication
+from app import theme
+from app.main_window import MainWindow
+from app.store import STORE, DATA_DIR
+app = QApplication([])
+theme.init(); theme.apply()
+w = MainWindow(); w.show()
+for _ in range(40):
+    app.processEvents()
+import time; time.sleep(0.3); app.processEvents()
+print("BOOKS", len(STORE.book_list()))
+print("EMPTY_VISIBLE", int(w.shelf_page.empty.isVisible()))
+print("DATA_DIR", int(DATA_DIR.exists()))
+print("THEME", theme.current()["theme"])
+w.hotkeys.stop(); w.edge.shutdown(); w.tray.hide()
+""" % str(fresh)
+    try:
+        out = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                             text=True, timeout=90, cwd=str(fresh))
+        text = out.stdout + out.stderr
+        check("全新环境首启不崩溃且显示空态",
+              "BOOKS 0" in text and "EMPTY_VISIBLE 1" in text
+              and "DATA_DIR 1" in text and out.returncode == 0,
+              " / ".join(ln for ln in text.strip().splitlines()[-4:]))
+        check("全新环境自动写入默认配置", "THEME paper" in text, "theme=paper")
+    except subprocess.TimeoutExpired:
+        check("全新环境首启不崩溃且显示空态", False, "90s 超时")
+    finally:
+        shutil.rmtree(fresh, ignore_errors=True)
+
+
+def test_resource_release():
+    print("\n=== 7. 反复开关与资源释放 ===")
+    win = MainWindow()
+    win.show()
+    pump(0.8)
+    book = max(STORE.book_list(), key=lambda x: x["stats"]["chapters"])
+    ch = STORE.chapters_of(book["id"])[0]
+    rss0 = 0.0
+    for i in range(12):
+        win.open_chapter(ch["path"], ch["name"], ch["id"])
+        pump(0.35)
+        win.back_from_reader()
+        pump(0.15)
+        win.reader_page.view.close_book()
+        pump(0.05)
+        if i == 2:
+            rss0 = _rss_mb()
+    rss1 = _rss_mb()
+    check("连续开关 12 次后页缓存清空",
+          len(win.reader_page.view._cache) == 0,
+          f"{len(win.reader_page.view._cache)} 项")
+    from app.cbr import POOL
+    check("文件句柄池不膨胀", len(POOL._items) <= 4, f"{len(POOL._items)} 个句柄")
+    if rss0 and rss1:
+        check("内存无明显增长（< 120MB）", rss1 - rss0 < 120,
+              f"{rss0:.0f}MB → {rss1:.0f}MB（Δ{rss1 - rss0:+.0f}）")
+    else:
+        note("当前平台读不到进程内存，内存增长项跳过")
+    _teardown(win)
+
+
+# ================================================================ 8. 源码卫生
 def test_source():
-    print("\n=== 6. 源码卫生 ===")
+    print("\n=== 8. 源码卫生 ===")
     bad = []
     for p in list((ROOT / "app").glob("*.py")) + [ROOT / "main.py"]:
         for ln, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
@@ -426,6 +534,8 @@ def main():
     test_theme_matrix()
     test_layout()
     test_perf()
+    test_fresh_install()
+    test_resource_release()
     test_source()
 
     print("\n" + "=" * 56)

@@ -28,6 +28,15 @@ SHOTS.mkdir(parents=True, exist_ok=True)
 FAILS: list[str] = []
 
 
+def purge_stale_test_files():
+    """清掉历次运行留下的测试压缩包（只匹配本套件自己的命名）。"""
+    for old in CACHE_DIR.glob("_test_copy_*.cbz"):
+        try:
+            old.unlink()
+        except Exception:
+            pass
+
+
 def pump(seconds: float, cond=None):
     app = QApplication.instance()
     end = time.time() + seconds
@@ -73,6 +82,7 @@ def make_test_images() -> Path:
 
 def main() -> int:
     app = QApplication([])
+    purge_stale_test_files()
     _theme.init(); _theme.apply()
     win = MainWindow()
     win.show()
@@ -517,6 +527,10 @@ def main() -> int:
         STORE.remove_chapter(c["id"])
     STORE.remove_book(bid_new)
     STORE.save_all()
+    try:
+        zpath.unlink(missing_ok=True)     # 本次生成的测试压缩包
+    except Exception:
+        pass
     win.shelf_page.refresh()
 
     ASYNC.wait(2000)
