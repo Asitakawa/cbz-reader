@@ -64,7 +64,7 @@ class TitleBar(QWidget):
         self.btn_max = self._mk("□", "TitleBtn", "最大化 / 还原", 36)
         self.btn_cam = self._mk("伪装", "TitleBtn", "桌面伪装（热键可切换）", 54)
         self.btn_hide = self._mk("隐藏", "TitleBtn", "隐藏窗口（热键可切换）", 54)
-        self.btn_close = self._mk("✕", "TitleBtn", "关闭", 38)
+        self.btn_close = self._mk("×", "TitleBtn", "关闭", 38)
         for b in (self.btn_cam, self.btn_hide, self.btn_min, self.btn_max, self.btn_close):
             lay.addWidget(b)
 
@@ -102,7 +102,7 @@ class TitleBar(QWidget):
         super().resizeEvent(e)
 
     def set_maximized(self, is_max: bool):
-        self.btn_max.setText("❐" if is_max else "□")
+        self.btn_max.setText("▢" if is_max else "□")
 
     # ---------- 拖动 ----------
     def mousePressEvent(self, e):

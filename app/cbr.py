@@ -113,7 +113,8 @@ class ComicSource:
                 for n in self.zip.namelist():
                     if n.endswith("/") or "__MACOSX" in n:
                         continue
-                    if Path(n).name.startswith("."):
+                    # 任一路径段以 . 开头都算隐藏（.hidden/004.png、.git/…）
+                    if any(part.startswith(".") for part in Path(n).parts):
                         continue
                     if Path(n).suffix.lower() in IMG_EXT:
                         names.append(n)

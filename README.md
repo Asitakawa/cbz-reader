@@ -96,8 +96,8 @@ Windows 下双击 `启动阅读器.bat`（无控制台窗口），排错时用 `
 
 **方式二：安装包**
 
-下载 `CBZReader_Setup_2.4.0.exe`，双击安装（安装到 `%LOCALAPPDATA%\CBZReader`，无需管理员权限），自动创建桌面与开始菜单快捷方式，可在「设置 → 应用」中卸载。
-便携版 `CBZReader_2.4.0_portable.zip` 解压即用。
+下载 `CBZReader_Setup_2.4.1.exe`，双击安装（安装到 `%LOCALAPPDATA%\CBZReader`，无需管理员权限），自动创建桌面与开始菜单快捷方式，可在「设置 → 应用」中卸载。
+便携版 `CBZReader_2.4.1_portable.zip` 解压即用。
 
 ## 快捷键
 
@@ -155,6 +155,7 @@ cbz-reader/
 │   └── imgutil.py          Pillow → QImage
 ├── tools/
 │   ├── smoke_test.py       无头回归测试（74 项断言）
+│   ├── robust_test.py      稳健性测试（35 项：坏文件 / 数据边界 / 主题矩阵 / 布局极值 / 性能）
 │   ├── render_preview.py   真机截图预览
 │   └── make_icon.py        生成 assets/icon.ico 与 PNG
 ├── packaging/
@@ -173,6 +174,7 @@ cbz-reader/
 
 ```bash
 python tools/smoke_test.py     # 无头回归（书→话模型 / 导入 / 解码 / 翻页 / 伪装 / 热键 / 边缘小窗 / 个性化主题 / 拖动缩放）
+python tools/robust_test.py    # 稳健性（损坏 cbz / 空包 / 坏页 / 数据边界 / 576 组主题 / 极值布局 / 性能）
 python tools/render_preview.py # 真机渲染截图（输出到 cache/_preview/）
 ```
 
@@ -190,8 +192,8 @@ python packaging/build.py      # 图标 → PyInstaller → 冻结自检 → 便
 | 文件 | 说明 |
 |---|---|
 | `dist/CBZReader/` | 绿色版程序目录（约 123 MB，含 Qt 运行时） |
-| `dist/CBZReader_2.4.0_portable.zip` | 便携版压缩包（约 62 MB） |
-| `dist/CBZReader_Setup_2.4.0.exe` | 单文件安装包（自带负载，双击即装，无需管理员） |
+| `dist/CBZReader_2.4.1_portable.zip` | 便携版压缩包（约 62 MB） |
+| `dist/CBZReader_Setup_2.4.1.exe` | 单文件安装包（自带负载，双击即装，无需管理员） |
 
 打包流程内置 `CBZReader.exe --selftest` 自检：验证 Pillow/WebP 解码、目录可写、书库读取与封面生成，自检不通过则打包失败。
 
