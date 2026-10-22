@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
+import shutil
 import sys
 import threading
 import time
@@ -122,6 +124,50 @@ def chapter_order_key(ch: dict, mode: str):
     return (0, num, 0, part, natkey(name))
 
 
+BACKUP_SUFFIX = ".bak"
+
+
+def read_json_file(path, default):
+    """读 JSON，返回 (数据, 来源)。主文件损坏时回退到 .bak。
+
+    来源：main / backup / default。损坏但不回退时不会抛异常，
+    调用方可以照常启动，下一次写入会把主文件修好。
+    """
+    p = Path(path)
+    for candidate, source in ((p, "main"), (Path(str(p) + BACKUP_SUFFIX), "backup")):
+        try:
+            if candidate.exists():
+                return json.loads(candidate.read_text(encoding="utf-8")), source
+        except Exception:
+            continue
+    return default, "default"
+
+
+def write_json_file(path, obj) -> bool:
+    """原子写；写入前把「当前这份能解析的文件」备份为 .bak。
+
+    如果当前主文件已经损坏，则不覆盖 .bak —— 否则唯一的好副本会被坏内容顶掉。
+    """
+    p = Path(path)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    try:
+        tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
+        if p.exists():
+            try:
+                json.loads(p.read_text(encoding="utf-8"))
+                shutil.copy2(p, Path(str(p) + BACKUP_SUFFIX))
+            except Exception:
+                pass
+        os.replace(tmp, p)
+        return True
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return False
+
+
 def _deep_merge(base: dict, over: dict) -> dict:
     out = dict(base)
     for k, v in (over or {}).items():
@@ -155,34 +201,33 @@ class Store:
 
     def __init__(self):
         self._lock = threading.RLock()
-        self.config = _deep_merge(DEFAULTS, self._read(CONFIG_FILE, {}))
-        self.history: dict = self._read(HISTORY_FILE, {})
-        data = self._read(SHELF_FILE, {})
+        self.recovered: list[str] = []          # 从 .bak 恢复过的文件名
+        self.config = _deep_merge(DEFAULTS,
+                                  self._load(CONFIG_FILE, {}, "config.json"))
+        self.history: dict = self._load(HISTORY_FILE, {}, "history.json")
+        data = self._load(SHELF_FILE, {}, "books.json")
         self.books: dict = data.get("books", {})
         self.chapters: dict = data.get("chapters", {})
         self._migrate_legacy()
 
     # ---------- 底层 ----------
+    def _load(self, path: Path, default, label: str):
+        data, source = read_json_file(path, default)
+        if source == "backup":
+            self.recovered.append(label)
+            logging.getLogger("store").warning("%s 损坏，已从 %s.bak 恢复", label, label)
+        elif source == "default" and path.exists():
+            logging.getLogger("store").error("%s 与备份都无法解析，使用空数据", label)
+        return data
+
     @staticmethod
     def _read(path: Path, default):
-        try:
-            if path.exists():
-                return json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-        return default
+        return read_json_file(path, default)[0]
 
     @staticmethod
     def _write(path: Path, obj) -> None:
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        try:
-            tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
-            os.replace(tmp, path)
-        except Exception:
-            try:
-                tmp.unlink(missing_ok=True)
-            except Exception:
-                pass
+        if not write_json_file(path, obj):
+            logging.getLogger("store").error("写入失败：%s", path.name)
 
     def save_config(self) -> None:
         with self._lock:

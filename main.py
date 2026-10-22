@@ -2,66 +2,29 @@
 from __future__ import annotations
 
 import ctypes
+import logging
 import os
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
-# 无控制台启动时 stdout 可能为 None，避免 print 崩溃
+# 无控制台启动时 stdout 可能为 None，避免 print 崩溃；
+# stderr 留给 logging_setup 接管（转写到 data/app.log，而不是丢弃）
 if sys.stdout is None:
     sys.stdout = open(os.devnull, "w", encoding="utf-8")
-if sys.stderr is None:
-    sys.stderr = open(os.devnull, "w", encoding="utf-8")
 
 from PySide6.QtCore import Qt                                    # noqa: E402
 from PySide6.QtGui import QFont                                  # noqa: E402
 from PySide6.QtWidgets import QApplication                       # noqa: E402
 
 from app.main_window import MainWindow                           # noqa: E402
-from app import theme                                            # noqa: E402
-
-MUTEX_NAME = "Global\\CbzReader_SingleInstance_9F3A"
-ERROR_ALREADY_EXISTS = 183
-
-# 读取 Win32 错误码必须用 use_last_error=True + ctypes.get_last_error()：
-# 直接用 ctypes.windll.kernel32.GetLastError() 会被中间调用污染，
-# 曾导致「首次启动也判定为已在运行」而直接退出。
-_K32 = ctypes.WinDLL("kernel32", use_last_error=True) if os.name == "nt" else None
-_MUTEX_HANDLE = None
-
-
-def already_running() -> bool:
-    """已有实例在运行则返回 True（句柄保留到进程结束，用于占位）。"""
-    global _MUTEX_HANDLE
-    if _K32 is None:
-        return False
-    try:
-        _K32.CreateMutexW.restype = ctypes.c_void_p
-        _K32.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p]
-        _MUTEX_HANDLE = _K32.CreateMutexW(None, False, MUTEX_NAME)
-        return ctypes.get_last_error() == ERROR_ALREADY_EXISTS
-    except Exception:
-        return False
-
-
-def warn_already_running() -> bool:
-    """不依赖 Qt 的确认框（此时 QApplication 还没创建）。
-
-    返回 True 表示用户选择「仍然启动」，继续开新窗口。
-    """
-    try:
-        MB_YESNO, MB_ICONQUESTION, IDYES = 0x04, 0x20, 6
-        rc = ctypes.windll.user32.MessageBoxW(
-            None,
-            "CBZ 阅读器似乎已经在运行中。\n\n"
-            "点「是」：仍然再开一个窗口（可能导致全局热键冲突）\n"
-            "点「否」：退出，改为使用已在运行的那个（右下角托盘可找到）",
-            "CBZ 阅读器", MB_YESNO | MB_ICONQUESTION)
-        return rc == IDYES
-    except Exception:
-        return False
+from app import __version__, theme                               # noqa: E402
+from app.logging_setup import (install_excepthook, install_qt_handler,   # noqa: E402
+                               log_environment, setup_logging)
+from app.single_instance import SingleInstance                   # noqa: E402
 
 
 def selftest() -> int:
@@ -155,10 +118,9 @@ def main() -> int:
     if "--selftest" in sys.argv:
         return selftest()
 
-    # 单实例守卫放在 QApplication 之前，避免 Qt 的 Win32 调用干扰错误码。
-    # 即使误判也不会硬拦：用户可以选择仍然启动。
-    if already_running() and not warn_already_running():
-        return 0
+    setup_logging()
+    install_excepthook()
+    install_qt_handler()
 
     if os.name == "nt":
         try:
@@ -174,8 +136,34 @@ def main() -> int:
     theme.init()          # 读取个性化配置（主题 / 强调色 / 圆角 / 字号）
     theme.apply()         # 生成并应用全局 QSS
 
+    log_environment(__version__)
+    from app.store import STORE
+    for label in STORE.recovered:
+        logging.getLogger("app").warning("数据文件已从备份恢复：%s", label)
+
+    # 单实例：第二个进程负责把已有窗口唤到前台，然后退出。
+    # 多个进程同时写 books.json 会互相覆盖，默认不允许。
+    allow_multi = "--allow-multi" in sys.argv
+    single = SingleInstance()
+    if not allow_multi:
+        if not single.acquire():
+            for _ in range(6):
+                if SingleInstance.notify():
+                    logging.getLogger("app").info("已有实例在运行，已唤起其窗口")
+                    return 0
+                time.sleep(0.35)
+            logging.getLogger("app").warning("检测到已有实例，但未能唤醒")
+            # 不弹模态框：无桌面环境（CI / 无头）会永久阻塞
+            return 0
+        app.aboutToQuit.connect(single.release)
+    else:
+        logging.getLogger("app").warning(
+            "以 --allow-multi 启动：多实例同时写书库可能互相覆盖")
+
     win = MainWindow()
     win.show()
+    if not allow_multi:
+        single.activated.connect(lambda: win.show_window())
     return app.exec()
 
 

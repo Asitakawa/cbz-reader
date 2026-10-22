@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import pathlib
 import shutil
 import sys
 import tempfile
@@ -518,9 +519,113 @@ def test_resource_release():
     _teardown(win)
 
 
-# ================================================================ 8. 源码卫生
+# ================================================================ 8. 单实例 / 备份 / 日志
+def test_single_instance():
+    print("\n=== 8. 单实例守卫 ===")
+    import subprocess
+    from app.single_instance import SingleInstance
+
+    key = f"cbz-selftest-{os.getpid()}"
+    first = SingleInstance(key)
+    check("首个实例取得锁", first.acquire())
+
+    lock_code = (
+        "import sys; sys.path.insert(0, %r)\n"
+        "from PySide6.QtWidgets import QApplication\n"
+        "app = QApplication([])\n"
+        "from app.single_instance import SingleInstance\n"
+        "print('ACQ', int(SingleInstance(%r).acquire()))\n"
+        % (str(ROOT), key)
+    )
+    out = subprocess.run([sys.executable, "-c", lock_code],
+                         capture_output=True, text=True, timeout=40,
+                         env=dict(os.environ, QT_QPA_PLATFORM="offscreen"))
+    check("另一个进程无法同时取得锁", "ACQ 0" in out.stdout,
+          out.stdout.strip().splitlines()[-1] if out.stdout.strip() else "无输出")
+    first.release()
+
+    # 用真实子进程当「已运行的实例」，父进程发唤醒请求
+    server_code = (
+        "import sys; sys.path.insert(0, %r)\n"
+        "from PySide6.QtWidgets import QApplication\n"
+        "from PySide6.QtCore import QTimer\n"
+        "app = QApplication([])\n"
+        "from app.single_instance import SingleInstance\n"
+        "s = SingleInstance(%r)\n"
+        "print('READY' if s.acquire() else 'BUSY', flush=True)\n"
+        "s.activated.connect(lambda: (print('GOT', flush=True), app.quit()))\n"
+        "QTimer.singleShot(8000, app.quit)\n"
+        "app.exec()\n"
+        "s.release()\n" % (str(ROOT), key)
+    )
+    child = subprocess.Popen([sys.executable, "-c", server_code],
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             text=True, env=dict(os.environ, QT_QPA_PLATFORM="offscreen"))
+    try:
+        ready = child.stdout.readline().strip()
+        check("子进程成为主实例", ready == "READY", ready or "无输出")
+        check("能通知到运行中的实例", SingleInstance.notify(key))
+        rest, _ = child.communicate(timeout=12)
+        check("运行中的实例收到唤醒并退出",
+              "GOT" in (ready + rest), (rest or "").strip()[:60])
+    finally:
+        if child.poll() is None:
+            child.kill()
+
+    again = SingleInstance(key)
+    check("实例退出后可以重新取得", again.acquire())
+    again.release()
+
+
+def test_backup_and_log():
+    print("\n=== 9. 数据备份与日志 ===")
+    import json
+    import logging
+    from app import logging_setup
+    from app.store import BACKUP_SUFFIX, read_json_file, write_json_file
+
+    d = WORK / "backup"
+    shutil.rmtree(d, ignore_errors=True)
+    d.mkdir(parents=True)
+    p = d / "books.json"
+    bak = pathlib.Path(str(p) + BACKUP_SUFFIX)
+
+    check("首次写入不产生备份", write_json_file(p, {"v": 1}) and not bak.exists())
+    write_json_file(p, {"v": 2})
+    check("再次写入保留上一版为 .bak",
+          json.loads(bak.read_text(encoding="utf-8"))["v"] == 1
+          and json.loads(p.read_text(encoding="utf-8"))["v"] == 2)
+
+    p.write_text("{ 这不是 JSON", encoding="utf-8")
+    data, source = read_json_file(p, {})
+    check("主文件损坏时回退 .bak", data == {"v": 1} and source == "backup",
+          f"来源 {source}")
+
+    write_json_file(p, {"v": 3})
+    check("损坏的主文件不会顶掉好备份",
+          json.loads(bak.read_text(encoding="utf-8"))["v"] == 1
+          and json.loads(p.read_text(encoding="utf-8"))["v"] == 3)
+
+    no_data, no_src = read_json_file(d / "missing.json", {"empty": True})
+    check("文件不存在时返回默认值", no_data == {"empty": True} and no_src == "default")
+
+    logging_setup.setup_logging()
+    marker = f"SELFTEST-{time.time():.0f}"
+    logging.getLogger("robust").info(marker)
+    pump(0.2)
+    text = logging_setup.LOG_FILE.read_text(encoding="utf-8") if \
+        logging_setup.LOG_FILE.exists() else ""
+    check("日志写入 data/app.log", marker in text,
+          f"{logging_setup.LOG_FILE.name} {len(text)} 字符")
+
+    logging_setup.install_excepthook()
+    check("已安装全局异常钩子", getattr(sys.excepthook, "__name__", "") == "hook")
+    check("已有实例状态可被主程序读取", hasattr(STORE, "recovered"))
+
+
+# ================================================================ 10. 源码卫生
 def test_source():
-    print("\n=== 8. 源码卫生 ===")
+    print("\n=== 10. 源码卫生 ===")
     bad = []
     for p in list((ROOT / "app").glob("*.py")) + [ROOT / "main.py"]:
         for ln, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
@@ -553,6 +658,8 @@ def main():
     test_perf()
     test_fresh_install()
     test_resource_release()
+    test_single_instance()
+    test_backup_and_log()
     test_source()
 
     print("\n" + "=" * 56)
