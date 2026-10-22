@@ -4,19 +4,20 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtCore import QPoint, QTimer, Qt, Signal
 from PySide6.QtGui import QFont, QFontMetrics, QPixmap
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
                                QScrollArea, QVBoxLayout, QWidget)
 
 from .cbr import natkey
+from .layout import content_column
 from .imgutil import cover_pixmap
 from .store import BOOKCOVER_DIR, COVER_DIR, ORDER_MODES, STORE
 from .tasks import ASYNC
 from . import theme
 from .window import Selector
 
-COVER_W, COVER_H = 104, 146
+COVER_W, COVER_H = 128, 180
 
 
 def fmt_time(ts: float) -> str:
@@ -43,23 +44,23 @@ class ChapterRow(QFrame):
     def __init__(self, index: int, ch: dict, parent=None):
         super().__init__(parent)
         self.setObjectName("Card")
-        self.setFixedHeight(62)
+        self.setFixedHeight(70)
         self.setCursor(Qt.PointingHandCursor)
         self.cid = ch["id"]
         self.ch = ch
 
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(12, 6, 12, 6)
+        lay.setContentsMargins(14, 8, 16, 8)
         lay.setSpacing(12)
 
         self.no = QLabel(str(index))
-        self.no.setFixedWidth(34)
+        self.no.setFixedWidth(44)
         self.no.setAlignment(Qt.AlignCenter)
         theme.style(self.no, "color:$sub;font-size:$f12;font-weight:600;")
         lay.addWidget(self.no)
 
         self.thumb = QLabel()
-        self.thumb.setFixedSize(30, 42)
+        self.thumb.setFixedSize(38, 54)
         self.thumb.setObjectName("CoverBox")
         self.thumb.setAlignment(Qt.AlignCenter)
         lay.addWidget(self.thumb)
@@ -86,17 +87,17 @@ class ChapterRow(QFrame):
 
         # 进度条
         bar_host = QFrame()
-        bar_host.setFixedSize(120, 6)
+        bar_host.setFixedSize(150, 6)
         theme.style(bar_host, "background:$border;border-radius:3px;")
         self.bar = QFrame(bar_host)
         ratio = 0.0 if not total else min(1.0, page / total)
-        self.bar.setGeometry(0, 0, int(120 * ratio), 6)
+        self.bar.setGeometry(0, 0, int(150 * ratio), 6)
         theme.now(self.bar, "background:%s;border-radius:3px;"
                   % theme.c("ok" if h.get("finished") else "accent"))
         lay.addWidget(bar_host)
 
         self.state = QLabel("已读完" if h.get("finished") else (f"{int(ratio*100)}%" if total else ""))
-        self.state.setFixedWidth(48)
+        self.state.setFixedWidth(56)
         self.state.setAlignment(Qt.AlignCenter)
         theme.now(self.state, "color:%s;font-size:%s;"
                   % (theme.c("ok" if h.get("finished") else "sub"), theme.px(11)))
@@ -107,18 +108,18 @@ class ChapterRow(QFrame):
     def _load_thumb(self):
         c = COVER_DIR / f"{self.cid}_420.jpg"
         if c.exists():
-            pm = cover_pixmap(QPixmap(str(c)), 30, 42, theme.radius_px() - 3,
+            pm = cover_pixmap(QPixmap(str(c)), 38, 54, theme.radius_px() - 3,
                               self.devicePixelRatioF())
             self.thumb.setPixmap(pm)
         else:
-            self.thumb.setText("📄")
+            self.thumb.setText("—")
             ASYNC.cover(self.ch["path"])
 
     def apply_cover(self, path: str):
         pm = QPixmap(path)
         if not pm.isNull():
             self.thumb.setText("")
-            self.thumb.setPixmap(cover_pixmap(pm, 30, 42, theme.radius_px() - 3,
+            self.thumb.setPixmap(cover_pixmap(pm, 38, 54, theme.radius_px() - 3,
                                               self.devicePixelRatioF()))
 
     def mouseReleaseEvent(self, e):
@@ -148,21 +149,21 @@ class BookDetailPage(QWidget):
         self._rows: dict[str, ChapterRow] = {}
         self._chapter_order: list[str] = []
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(18, 12, 18, 12)
-        root.setSpacing(10)
+        root = content_column(self, spacing=16)
 
         # ---- 顶部操作条 ----
         bar = QHBoxLayout()
         bar.setSpacing(8)
         self.btn_back = QPushButton("← 书架")
         self.btn_back.setObjectName("Ghost")
+        self.btn_back.setFixedHeight(34)
         self.btn_back.setCursor(Qt.PointingHandCursor)
         self.btn_back.clicked.connect(self.back_requested)
         bar.addWidget(self.btn_back)
         bar.addSpacing(6)
         self.cmb_order = Selector()
-        self.cmb_order.setFixedWidth(196)
+        self.cmb_order.setFixedWidth(214)
+        self.cmb_order.setFixedHeight(34)
         self.cmb_order.setToolTip("话数排列方式（每本书单独设置，默认按导入顺序）")
         for key, label in ORDER_MODES.items():
             self.cmb_order.addItem(label, key)
@@ -178,6 +179,7 @@ class BookDetailPage(QWidget):
             b.setObjectName("Ghost")
         for b in (self.btn_resume, self.btn_rename, self.btn_cover, self.btn_import):
             b.setCursor(Qt.PointingHandCursor)
+            b.setFixedHeight(34)
             bar.addWidget(b)
         root.addLayout(bar)
 
@@ -185,8 +187,8 @@ class BookDetailPage(QWidget):
         self.card = QFrame()
         self.card.setObjectName("Card")
         cl = QHBoxLayout(self.card)
-        cl.setContentsMargins(16, 14, 16, 14)
-        cl.setSpacing(16)
+        cl.setContentsMargins(22, 20, 22, 20)
+        cl.setSpacing(22)
         self.cover = QLabel()
         self.cover.setFixedSize(COVER_W, COVER_H)
         self.cover.setAlignment(Qt.AlignCenter)
@@ -197,9 +199,11 @@ class BookDetailPage(QWidget):
             if e.button() == Qt.LeftButton else None
         cl.addWidget(self.cover)
 
-        info = QVBoxLayout()
+        info_host = QWidget()
+        self.info_host = info_host
+        info = QVBoxLayout(info_host)
         info.setContentsMargins(0, 0, 0, 0)
-        info.setSpacing(6)
+        info.setSpacing(9)
         self.lbl_title = QLabel("")
         self.lbl_title.setObjectName("BookTitle")
         self.lbl_meta = QLabel("")
@@ -209,20 +213,63 @@ class BookDetailPage(QWidget):
         self.lbl_path.setWordWrap(True)
         self.pbar_host = QFrame()
         self.pbar_host.setFixedHeight(6)
-        self.pbar_host.setMaximumWidth(240)
+        self.pbar_host.setFixedWidth(320)
         theme.style(self.pbar_host, "background:$border;border-radius:3px;")
         self.pbar = QFrame(self.pbar_host)
         self.pbar.setGeometry(0, 0, 0, 6)
         theme.style(self.pbar, "background:$accent;border-radius:3px;")
+        prow = QHBoxLayout()
+        prow.setContentsMargins(0, 2, 0, 2)
+        prow.setSpacing(10)
+        prow.addWidget(self.pbar_host)
+        self.lbl_pct = QLabel("")
+        self.lbl_pct.setObjectName("Muted")
+        self.lbl_pct.setFixedWidth(44)
+        prow.addWidget(self.lbl_pct)
+        prow.addStretch(1)
         info.addWidget(self.lbl_title)
         info.addWidget(self.lbl_meta)
-        info.addWidget(self.pbar_host)
+        info.addLayout(prow)
         info.addWidget(self.lbl_path)
         info.addStretch(1)
-        cl.addLayout(info, 1)
+        cl.addWidget(info_host, 1)
+
+        stats_host = QWidget()
+        sh = QHBoxLayout(stats_host)
+        sh.setContentsMargins(0, 4, 0, 4)
+        sh.setSpacing(30)
+        self.stat_nums = {}
+        for key, label in (("chapters", "话数"), ("finished", "已读"), ("times", "阅读次数")):
+            box = QVBoxLayout()
+            box.setContentsMargins(0, 0, 0, 0)
+            box.setSpacing(2)
+            num = QLabel("0")
+            num.setObjectName("StatNum")
+            lab = QLabel(label)
+            lab.setObjectName("StatLbl")
+            box.addWidget(num)
+            box.addWidget(lab)
+            box.addStretch(1)
+            sh.addLayout(box)
+            self.stat_nums[key] = num
+        cl.addWidget(stats_host)
         root.addWidget(self.card)
 
         # ---- 话列表 ----
+        self.list_head = QWidget()
+        lh = QHBoxLayout(self.list_head)
+        lh.setContentsMargins(14, 0, 16, 0)
+        lh.setSpacing(12)
+        for text, width in (("话", 44), ("", 38), ("名称", 0), ("进度", 150), ("状态", 56)):
+            lab = QLabel(text)
+            lab.setObjectName("Muted")
+            if width:
+                lab.setFixedWidth(width)
+                lh.addWidget(lab)
+            else:
+                lh.addWidget(lab, 1)
+        root.addWidget(self.list_head)
+
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.host = QWidget()
@@ -295,7 +342,11 @@ class BookDetailPage(QWidget):
         else:
             self.lbl_path.setText("还没有导入内容")
         self.pbar.setGeometry(0, 0, int(self.pbar_host.width() * st["ratio"]) if chs else 0, 6)
+        self.lbl_pct.setText(f"{int(round(st['ratio'] * 100))}%")
+        for key, num in getattr(self, "stat_nums", {}).items():
+            num.setText(str(st.get(key, 0)))
         self.btn_resume.setEnabled(bool(chs))
+        self.list_head.setVisible(bool(chs))
 
         # 话列表
         while self.lay.count() > 1:
@@ -315,6 +366,7 @@ class BookDetailPage(QWidget):
         self.empty.setVisible(not chs)
         self.scroll.setVisible(bool(chs))
         self._load_cover()
+        QTimer.singleShot(0, self._fit_title)
 
     def _load_cover(self):
         cid, custom = STORE.book_cover_source(self.bid)
@@ -437,10 +489,10 @@ class BookDetailPage(QWidget):
         self.changed.emit()
 
     def _fit_title(self):
-        """书名超长时省略，避免把信息区挤成一行超长文本。"""
+        """书名超长时省略；宽度取信息区实际可用宽度（右侧有统计块）。"""
         if not self._title:
             return
-        avail = max(240, (self.card.width() or self.width()) - COVER_W - 80)
+        avail = max(220, (self.info_host.width() or 520) - 6)
         fm = QFontMetrics(self.lbl_title.font())
         self.lbl_title.setText(fm.elidedText(self._title, Qt.ElideRight, avail))
 
@@ -449,6 +501,7 @@ class BookDetailPage(QWidget):
         n = st.get("chapters", 0)
         self.pbar.setGeometry(0, 0, int(self.pbar_host.width() * st.get("ratio", 0)) if n else 0, 6)
         self._fit_title()
+        QTimer.singleShot(0, self._fit_title)     # 等布局完成后再按真实宽度省略
         super().resizeEvent(e)
 
 

@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFrame,
                                QVBoxLayout, QWidget)
 
 from .hotkey import parse_hotkey
+from .layout import PageHeader, content_column
 from .imgutil import cover_pixmap
 from .window import Selector, Toggle
 from .store import APP_DIR, DATA_DIR, STORE
@@ -45,9 +46,10 @@ class StatCard(QFrame):
     def __init__(self, value: str, label: str, parent=None):
         super().__init__(parent)
         self.setObjectName("Card")
+        self.setMinimumHeight(88)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(14, 10, 14, 10)
-        lay.setSpacing(2)
+        lay.setContentsMargins(18, 14, 18, 14)
+        lay.setSpacing(4)
         self.lbl_v = QLabel(value)
         self.lbl_v.setObjectName("StatNum")
         self.lbl_l = QLabel(label)
@@ -66,17 +68,17 @@ class HistoryRow(QFrame):
     def __init__(self, h: dict, parent=None):
         super().__init__(parent)
         self.setObjectName("Card")
-        self.setFixedHeight(74)
+        self.setFixedHeight(84)
         self._key = h["key"]
         self._path = h.get("path", "")
         self._name = h.get("name", "")
 
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(10, 8, 12, 8)
-        lay.setSpacing(12)
+        lay.setContentsMargins(14, 10, 16, 10)
+        lay.setSpacing(14)
 
         self.thumb = QLabel()
-        self.thumb.setFixedSize(40, 56)
+        self.thumb.setFixedSize(44, 60)
         self.thumb.setObjectName("CoverBox")
         self.thumb.setAlignment(Qt.AlignCenter)
         lay.addWidget(self.thumb)
@@ -85,7 +87,7 @@ class HistoryRow(QFrame):
         info = QWidget()
         v = QVBoxLayout(info)
         v.setContentsMargins(0, 0, 0, 0)
-        v.setSpacing(3)
+        v.setSpacing(4)
         name = QLabel()
         name.setObjectName("CardTitle")
         fm = QFontMetrics(name.font())
@@ -98,25 +100,36 @@ class HistoryRow(QFrame):
                      + ("  · 已读完" if h.get("finished") else ""))
         sub.setObjectName("Muted")
         bar = QFrame()
-        bar.setFixedHeight(4)
+        bar.setFixedHeight(5)
         theme.style(bar, "background:$border;border-radius:2px;")
         bin_ = QFrame(bar)
-        bin_.setGeometry(0, 0, int(240 * ratio), 4)
+        bin_.setGeometry(0, 0, int(210 * ratio), 5)
         theme.now(bin_, "background:$accent;border-radius:2px;")
-        bar.setFixedWidth(240)
+        bar.setFixedWidth(210)
+        prow = QHBoxLayout()
+        prow.setContentsMargins(0, 3, 0, 0)
+        prow.setSpacing(8)
+        prow.addWidget(bar)
+        pct = QLabel(f"{int(round(ratio * 100))}%")
+        pct.setObjectName("Muted")
+        pct.setFixedWidth(38)
+        prow.addWidget(pct)
+        prow.addStretch(1)
         v.addWidget(name)
         v.addWidget(sub)
-        v.addWidget(bar)
+        v.addLayout(prow)
         lay.addWidget(info, 1)
 
         b1 = QPushButton("继续阅读")
         b1.setObjectName("Primary")
-        b1.setFixedWidth(100)
+        b1.setFixedWidth(98)
+        b1.setFixedHeight(30)
         b1.setCursor(Qt.PointingHandCursor)
         b1.clicked.connect(lambda: self.resume.emit(self._path, self._name, self._key))
         b2 = QPushButton("移除记录")
         b2.setObjectName("Ghost")
-        b2.setFixedWidth(94)
+        b2.setFixedWidth(92)
+        b2.setFixedHeight(30)
         b2.setCursor(Qt.PointingHandCursor)
         b2.clicked.connect(lambda: self.remove.emit(self._key))
         lay.addWidget(b1)
@@ -126,11 +139,11 @@ class HistoryRow(QFrame):
         from .store import COVER_DIR
         c = COVER_DIR / f"{self._key}_420.jpg"
         if c.exists():
-            pm = cover_pixmap(QPixmap(str(c)), 40, 56, theme.radius_px() - 2,
+            pm = cover_pixmap(QPixmap(str(c)), 44, 60, theme.radius_px() - 2,
                               self.devicePixelRatioF())
             self.thumb.setPixmap(pm)
         else:
-            self.thumb.setText("📕")
+            self.thumb.setText("无")
             ASYNC.cover(self._path, 420)
 
 
@@ -141,24 +154,19 @@ class HistoryPage(QWidget):
     def __init__(self, parent=None):
         super().__init__()
         self.setObjectName("Page")
-        root = QVBoxLayout(self)
-        root.setContentsMargins(18, 12, 18, 12)
-        root.setSpacing(10)
+        root = content_column(self, spacing=16)
 
-        head = QHBoxLayout()
-        t = QLabel("阅读历史")
-        t.setObjectName("SectionTitle")
-        head.addWidget(t)
-        head.addStretch(1)
+        self.header = PageHeader("阅读历史", "最近读过的书与话，按时间倒序")
         b_clear = QPushButton("清空历史")
         b_clear.setObjectName("Danger")
+        b_clear.setFixedHeight(34)
         b_clear.setCursor(Qt.PointingHandCursor)
         b_clear.clicked.connect(self._clear)
-        head.addWidget(b_clear)
-        root.addLayout(head)
+        self.header.actions.addWidget(b_clear)
+        root.addWidget(self.header)
 
         self.stats = QHBoxLayout()
-        self.stats.setSpacing(10)
+        self.stats.setSpacing(12)
         self.s1 = StatCard("0", "在读书籍")
         self.s2 = StatCard("0", "已读完")
         self.s3 = StatCard("0", "总阅读次数")
@@ -169,10 +177,11 @@ class HistoryPage(QWidget):
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
         self.host = QWidget()
         self.lay = QVBoxLayout(self.host)
         self.lay.setContentsMargins(0, 0, 0, 0)
-        self.lay.setSpacing(8)
+        self.lay.setSpacing(10)
         self.lay.addStretch(1)
         self.scroll.setWidget(self.host)
         root.addWidget(self.scroll, 1)
@@ -293,132 +302,97 @@ class SettingsPage(QWidget):
     def __init__(self, parent=None):
         super().__init__()
         self.setObjectName("Page")
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(18, 12, 18, 12)
-        outer.setSpacing(10)
-        head = QVBoxLayout()
-        head.setContentsMargins(0, 0, 0, 0)
-        head.setSpacing(1)
-        t = QLabel("设置")
-        t.setObjectName("SectionTitle")
-        sub = QLabel("外观（主题 / 强调色 / 圆角 / 字号）在左侧「个性化」页，这里管功能与行为")
-        sub.setObjectName("PageSub")
-        head.addWidget(t)
-        head.addWidget(sub)
-        outer.addLayout(head)
+        outer = content_column(self, max_width=1040, spacing=16)
+        self.header = PageHeader("设置", "外观在「个性化」页；这里管理阅读、热键、伪装与数据")
+        outer.addWidget(self.header)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
         host = QWidget()
         lay = QVBoxLayout(host)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(10)
+        lay.setSpacing(16)
         scroll.setWidget(host)
         outer.addWidget(scroll, 1)
 
         # ---- 热键与隐藏 ----
-        g1, b1 = self._group(lay, "热键与隐藏")
-        row = QHBoxLayout()
-        row.addWidget(self._lbl("隐藏 / 恢复窗口"))
+        b1, g1 = self._group(lay, "热键与隐藏", "系统级热键，窗口失焦时同样有效")
         self.kp_hide = KeyCapture(STORE.cfg("hotkey_hide", "ctrl+`"))
         self.kp_hide.changed.connect(lambda s: self._save_hotkey("hotkey_hide", "hide", s))
-        row.addWidget(self.kp_hide)
         self.lbl_hide_state = QLabel("")
         self.lbl_hide_state.setObjectName("Muted")
-        row.addWidget(self.lbl_hide_state)
-        row.addStretch(1)
-        b1.addLayout(row)
+        self._row(g1, 0, "隐藏 / 恢复窗口", self.kp_hide, self.lbl_hide_state)
 
-        row = QHBoxLayout()
-        row.addWidget(self._lbl("桌面伪装 开 / 关"))
         self.kp_camo = KeyCapture(STORE.cfg("hotkey_camo", "ctrl+shift+x"))
         self.kp_camo.changed.connect(lambda s: self._save_hotkey("hotkey_camo", "camo", s))
-        row.addWidget(self.kp_camo)
-        row.addStretch(1)
-        b1.addLayout(row)
-
+        self._row(g1, 1, "桌面伪装 开 / 关", self.kp_camo)
         b1.addWidget(self._hint("隐藏窗口后仍在托盘中，按同一热键恢复。伪装状态下再次按热键即可解除"
                                 "（也可连点窗口右下角三次）。"))
 
         # ---- 阅读 ----
-        _g2, b2 = self._group(lay, "阅读默认")
-        row = QHBoxLayout()
-        row.addWidget(self._lbl("默认阅读方向"))
+        b2, g2 = self._group(lay, "阅读默认", "新打开的书会沿用这些默认值")
         self.cmb_dir = Selector()
         self.cmb_dir.addItems(["从左到右", "从右到左（日漫）"])
         self.cmb_dir.setCurrentIndex(1 if STORE.cfg("reader.rtl") else 0)
         self.cmb_dir.currentIndexChanged.connect(
             lambda i: (STORE.set_cfg("reader.rtl", i == 1), STORE.save_config()))
-        row.addWidget(self.cmb_dir)
-        row.addSpacing(20)
-        row.addWidget(self._lbl("默认模式"))
+        self._row(g2, 0, "阅读方向", self.cmb_dir)
+
         self.cmb_mode = Selector()
         self.cmb_mode.addItems(["连续滚动", "单页翻页"])
         self.cmb_mode.setCurrentIndex(0 if STORE.cfg("reader.mode") == "scroll" else 1)
         self.cmb_mode.currentIndexChanged.connect(
-            lambda i: (STORE.set_cfg("reader.mode", "scroll" if i == 0 else "single"), STORE.save_config()))
-        row.addWidget(self.cmb_mode)
-        row.addStretch(1)
-        b2.addLayout(row)
+            lambda i: (STORE.set_cfg("reader.mode", "scroll" if i == 0 else "single"),
+                       STORE.save_config()))
+        self._row(g2, 1, "默认模式", self.cmb_mode)
 
-        row = QHBoxLayout()
-        row.addWidget(self._lbl("阅读背景"))
         self.cmb_bg = Selector()
         for name, color in (("深灰（默认）", "#101216"), ("纯黑", "#000000"),
                             ("墨蓝", "#0E1420"), ("暖白", "#F2EFE9"), ("米黄", "#EFE6D0")):
             self.cmb_bg.addItem(name, color)
         cur = STORE.cfg("reader.bg", "#101216")
-        idx = max(0, self.cmb_bg.findData(cur))
-        self.cmb_bg.setCurrentIndex(idx)
+        self.cmb_bg.setCurrentIndex(max(0, self.cmb_bg.findData(cur)))
         self.cmb_bg.currentIndexChanged.connect(self._save_bg)
-        row.addWidget(self.cmb_bg)
-        row.addSpacing(20)
-        row.addWidget(self._lbl("工具条自动隐藏"))
+        self._row(g2, 2, "阅读背景", self.cmb_bg)
+
         self.chk_autohide = Toggle()
         self.chk_autohide.setChecked(bool(STORE.cfg("reader_ui.auto_hide_toolbar", True)))
         self.chk_autohide.stateChanged.connect(
-            lambda s: (STORE.set_cfg("reader_ui.auto_hide_toolbar", bool(s)), STORE.save_config()))
-        row.addWidget(self.chk_autohide)
-        row.addStretch(1)
-        b2.addLayout(row)
+            lambda s: (STORE.set_cfg("reader_ui.auto_hide_toolbar", bool(s)),
+                       STORE.save_config()))
+        self._row(g2, 3, "工具条自动隐藏", self.chk_autohide)
 
         # ---- 伪装 ----
-        _g3, b3 = self._group(lay, "桌面伪装")
-        row = QHBoxLayout()
-        row.addWidget(self._lbl("伪装外观"))
+        b3, g3 = self._group(lay, "桌面伪装", "窗口会变成对应的办公软件外观")
         self.cmb_camo = Selector()
         self.cmb_camo.addItem("Excel 表格", "excel")
         self.cmb_camo.addItem("Word 文档", "word")
         self.cmb_camo.addItem("CMD 终端", "term")
-        self.cmb_camo.setCurrentIndex(max(0, self.cmb_camo.findData(STORE.cfg("camo.skin", "excel"))))
+        self.cmb_camo.setCurrentIndex(max(0, self.cmb_camo.findData(
+            STORE.cfg("camo.skin", "excel"))))
         self.cmb_camo.currentIndexChanged.connect(self._save_camo)
-        row.addWidget(self.cmb_camo)
-        row.addSpacing(20)
-        row.addWidget(self._lbl("伪装时从任务栏隐藏"))
+        self._row(g3, 0, "伪装外观", self.cmb_camo)
+
         self.chk_tb = Toggle()
         self.chk_tb.setChecked(bool(STORE.cfg("camo.hide_in_taskbar", True)))
         self.chk_tb.stateChanged.connect(
             lambda s: (STORE.set_cfg("camo.hide_in_taskbar", bool(s)), STORE.save_config()))
-        row.addWidget(self.chk_tb)
-        row.addStretch(1)
-        b3.addLayout(row)
-        b3.addWidget(self._hint("伪装时窗口标题会同步改为对应的应用名；解锁方式：热键，或连点窗口右下角 3 次。"))
+        self._row(g3, 1, "伪装时从任务栏隐藏", self.chk_tb)
+        b3.addWidget(self._hint("伪装时窗口标题会同步改为对应的应用名；解锁方式：热键，"
+                                "或连点窗口右下角 3 次。"))
 
         # ---- 窗口 ----
-        _g4, b4 = self._group(lay, "窗口")
-        row = QHBoxLayout()
-        row.addWidget(self._lbl("窗口不透明度"))
+        b4, g4 = self._group(lay, "窗口", "无边框窗口的位置与关闭行为")
         self.sld_op = QSlider(Qt.Horizontal)
         self.sld_op.setRange(40, 100)
         self.sld_op.setValue(int(float(STORE.cfg("window.opacity", 1.0)) * 100))
-        self.sld_op.setFixedWidth(200)
+        self.sld_op.setFixedWidth(220)
         self.lbl_op = QLabel(f"{self.sld_op.value()}%")
         self.lbl_op.setFixedWidth(46)
         self.sld_op.valueChanged.connect(self._save_opacity)
-        row.addWidget(self.sld_op)
-        row.addWidget(self.lbl_op)
-        row.addSpacing(18)
-        row.addWidget(self._lbl("关闭窗口时"))
+        self._row(g4, 0, "窗口不透明度", self.sld_op, self.lbl_op)
+
         self.cmb_close = Selector()
         self.cmb_close.addItem("每次询问", "ask")
         self.cmb_close.addItem("关闭软件", "quit")
@@ -427,86 +401,78 @@ class SettingsPage(QWidget):
             {"ask": 0, "quit": 1, "tray": 2}.get(STORE.cfg("window.close_action", "ask"), 0))
         self.cmb_close.currentIndexChanged.connect(
             lambda i: self.close_action_changed.emit(self.cmb_close.currentData()))
-        row.addWidget(self.cmb_close)
-        row.addStretch(1)
-        b4.addLayout(row)
-        b4.addWidget(self._hint("按住窗口任意边缘可自由缩放；拖住标题栏任意位置可移动；双击标题栏最大化。"
-                                "「关闭窗口时」可选每次询问、直接退出、或最小化到托盘继续后台运行。"))
+        self._row(g4, 1, "关闭窗口时", self.cmb_close)
+        b4.addWidget(self._hint("按住窗口任意边缘可自由缩放；拖住标题栏任意位置可移动；"
+                                "双击标题栏最大化。"))
 
         # ---- 屏幕边缘小窗 ----
-        _g6, b6 = self._group(lay, "边缘迷你阅读器")
-        row = QHBoxLayout()
-        row.addWidget(self._lbl("启用"))
+        b6, g6 = self._group(lay, "边缘迷你阅读器", "贴边隐蔽的小阅读窗")
         self.chk_edge = Toggle()
         self.chk_edge.setChecked(bool(STORE.cfg("edge.enabled", True)))
         self.chk_edge.stateChanged.connect(lambda s: self._emit_edge({"enabled": _nz(s)}))
-        row.addWidget(self.chk_edge)
-        row.addSpacing(18)
-        row.addWidget(self._lbl("停靠位置"))
+        self._row(g6, 0, "启用", self.chk_edge)
+
         self.cmb_edge_side = Selector()
         self.cmb_edge_side.addItem("屏幕右侧", "right")
         self.cmb_edge_side.addItem("屏幕左侧", "left")
         self.cmb_edge_side.setCurrentIndex(0 if STORE.cfg("edge.side", "right") == "right" else 1)
         self.cmb_edge_side.currentIndexChanged.connect(
             lambda i: self._emit_edge({"side": self.cmb_edge_side.currentData()}))
-        row.addWidget(self.cmb_edge_side)
-        row.addStretch(1)
-        b6.addLayout(row)
+        self._row(g6, 1, "停靠位置", self.cmb_edge_side)
 
-        row = QHBoxLayout()
-        row.addWidget(self._lbl("收起形态"))
         self.cmb_edge_shape = Selector()
         self.cmb_edge_shape.addItem("细缝（6px，最隐蔽）", "sliver")
         self.cmb_edge_shape.addItem("窄条（40px，好点中）", "strip")
-        self.cmb_edge_shape.setCurrentIndex(0 if STORE.cfg("edge.shape", "sliver") == "sliver" else 1)
+        self.cmb_edge_shape.setCurrentIndex(
+            0 if STORE.cfg("edge.shape", "sliver") == "sliver" else 1)
         self.cmb_edge_shape.currentIndexChanged.connect(
             lambda i: self._emit_edge({"shape": self.cmb_edge_shape.currentData()}))
-        row.addWidget(self.cmb_edge_shape)
-        row.addSpacing(18)
-        row.addWidget(self._lbl("边缘感应"))
+        self._row(g6, 2, "收起形态", self.cmb_edge_shape)
+
         self.chk_edge_peek = Toggle()
         self.chk_edge_peek.setChecked(bool(STORE.cfg("edge.auto_peek", True)))
         self.chk_edge_peek.stateChanged.connect(
             lambda s: self._emit_edge({"auto_peek": _nz(s)}))
-        row.addWidget(self.chk_edge_peek)
-        row.addStretch(1)
-        b6.addLayout(row)
+        self._row(g6, 3, "边缘感应", self.chk_edge_peek)
         b6.addWidget(self._hint(
-            "贴在屏幕边缘的隐蔽式小阅读器：平时只是一条细缝，鼠标碰到屏幕边缘即滑出当前页，"
-            "滚轮或点击左右两侧翻页，Ctrl+滚轮调整阅读窗大小，鼠标离开立即缩回；双击页面在主窗口打开当前页。"
-            "右键可切换左右停靠 / 细缝或窄条 / 边缘感应。开启桌面伪装或全屏阅读时自动隐身。"))
+            "平时只是一条细缝，鼠标碰到屏幕边缘即滑出当前页；滚轮或点击左右两侧翻页，"
+            "中键显示 / 隐藏信息条，Ctrl+滚轮调整阅读窗大小。"
+            "右键可切换左右停靠 / 细缝或窄条 / 边缘感应。"))
 
         # ---- 库与数据 ----
-        _g5, b5 = self._group(lay, "书库与数据")
-        row = QHBoxLayout()
+        b5, g5 = self._group(lay, "书库与数据", "所有数据都保存在程序同级目录")
         self.lbl_lib = QLabel(STORE.cfg("library_dir", ""))
         self.lbl_lib.setObjectName("Muted")
         self.lbl_lib.setWordWrap(True)
-        row.addWidget(self.lbl_lib, 1)
         b_open_lib = QPushButton("打开目录")
         b_open_lib.setObjectName("Ghost")
+        b_open_lib.setCursor(Qt.PointingHandCursor)
         b_open_lib.clicked.connect(lambda: self._open_dir(STORE.cfg("library_dir", "")))
         b_chg_lib = QPushButton("更改目录")
         b_chg_lib.setObjectName("Ghost")
+        b_chg_lib.setCursor(Qt.PointingHandCursor)
         b_chg_lib.clicked.connect(self._change_lib)
         for b in (b_open_lib, b_chg_lib):
-            b.setCursor(Qt.PointingHandCursor)
-            row.addWidget(b)
-        b5.addLayout(row)
-
+            b.setFixedHeight(32)
         row = QHBoxLayout()
+        row.setSpacing(10)
+        row.addWidget(self.lbl_lib, 1)
+        row.addWidget(b_open_lib)
+        row.addWidget(b_chg_lib)
+        g5.addWidget(self._lbl("书库目录"), 0, 0, Qt.AlignLeft | Qt.AlignVCenter)
+        g5.addLayout(row, 0, 1)
+
         b_data = QPushButton("打开数据目录")
         b_data.setObjectName("Ghost")
         b_data.setCursor(Qt.PointingHandCursor)
+        b_data.setFixedHeight(32)
         b_data.clicked.connect(lambda: self._open_dir(str(DATA_DIR)))
         b_reset = QPushButton("恢复默认设置")
         b_reset.setObjectName("Danger")
         b_reset.setCursor(Qt.PointingHandCursor)
+        b_reset.setFixedHeight(32)
         b_reset.clicked.connect(self._reset)
-        row.addWidget(b_data)
-        row.addWidget(b_reset)
-        row.addStretch(1)
-        b5.addLayout(row)
+        self._row(g5, 1, "维护", b_data, b_reset)
 
         lay.addStretch(1)
 
@@ -515,7 +481,6 @@ class SettingsPage(QWidget):
     def _lbl(text: str) -> QLabel:
         l = QLabel(text)
         l.setObjectName("FormLabel")
-        l.setMinimumWidth(130)
         return l
 
     @staticmethod
@@ -526,17 +491,42 @@ class SettingsPage(QWidget):
         return l
 
     @staticmethod
-    def _group(parent: QVBoxLayout, title: str):
+    def _group(parent: QVBoxLayout, title: str, sub: str = ""):
         card = QFrame()
         card.setObjectName("Card")
         v = QVBoxLayout(card)
-        v.setContentsMargins(16, 12, 16, 14)
-        v.setSpacing(8)
+        v.setContentsMargins(22, 18, 22, 20)
+        v.setSpacing(14)
+        head = QHBoxLayout()
+        head.setSpacing(10)
         t = QLabel(title)
         t.setObjectName("GroupTitle")
-        v.addWidget(t)
+        head.addWidget(t)
+        if sub:
+            m = QLabel(sub)
+            m.setObjectName("Muted")
+            head.addWidget(m)
+        head.addStretch(1)
+        v.addLayout(head)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(18)
+        grid.setVerticalSpacing(12)
+        grid.setColumnMinimumWidth(0, 150)
+        grid.setColumnStretch(1, 1)
+        v.addLayout(grid)
         parent.addWidget(card)
-        return card, v
+        return v, grid
+
+    def _row(self, grid: QGridLayout, r: int, label: str, *widgets):
+        grid.addWidget(self._lbl(label), r, 0, Qt.AlignLeft | Qt.AlignVCenter)
+        h = QHBoxLayout()
+        h.setSpacing(10)
+        for w in widgets:
+            if isinstance(w, (QComboBox, QLineEdit)):
+                w.setMinimumHeight(32)
+            h.addWidget(w)
+        h.addStretch(1)
+        grid.addLayout(h, r, 1)
 
     # ---------- 回调 ----------
     def _save_bg(self, _i):

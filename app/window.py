@@ -34,16 +34,16 @@ class TitleBar(QWidget):
     def __init__(self, title: str, subtitle: str = "", parent=None):
         super().__init__(parent)
         self.setObjectName("TitleBar")
-        self.setFixedHeight(44)
+        self.setFixedHeight(48)
         self._drag_offset: QPoint | None = None
         self._press_pos: QPoint | None = None
 
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(14, 0, 8, 0)
-        lay.setSpacing(10)
+        lay.setContentsMargins(18, 0, 10, 0)
+        lay.setSpacing(12)
 
-        self.icon = QLabel("📚")
-        self.icon.setStyleSheet("font-size:15px;")
+        self.icon = QLabel("▤")
+        self.icon.setStyleSheet("font-size:16px;")
         lay.addWidget(self.icon)
 
         box = QVBoxLayout()
@@ -60,11 +60,11 @@ class TitleBar(QWidget):
         lay.addLayout(box)
         lay.addStretch(1)
 
-        self.btn_min = self._mk("—", "TitleBtn", "最小化")
-        self.btn_max = self._mk("□", "TitleBtn", "最大化 / 还原")
-        self.btn_cam = self._mk("伪装", "TitleBtn", "桌面伪装（热键可切换）", 50)
-        self.btn_hide = self._mk("隐藏", "TitleBtn", "隐藏窗口（热键可切换）", 50)
-        self.btn_close = self._mk("✕", "TitleBtn", "关闭")
+        self.btn_min = self._mk("—", "TitleBtn", "最小化", 36)
+        self.btn_max = self._mk("□", "TitleBtn", "最大化 / 还原", 36)
+        self.btn_cam = self._mk("伪装", "TitleBtn", "桌面伪装（热键可切换）", 54)
+        self.btn_hide = self._mk("隐藏", "TitleBtn", "隐藏窗口（热键可切换）", 54)
+        self.btn_close = self._mk("✕", "TitleBtn", "关闭", 38)
         for b in (self.btn_cam, self.btn_hide, self.btn_min, self.btn_max, self.btn_close):
             lay.addWidget(b)
 
@@ -75,12 +75,12 @@ class TitleBar(QWidget):
     def _mk(self, text: str, obj: str, tip: str, w: int = 34) -> QPushButton:
         b = QPushButton(text)
         b.setObjectName("CloseBtn" if "CloseBtn" in obj else obj.split()[0])
-        b.setFixedSize(w, 28)
+        b.setFixedSize(w, 32)
         b.setCursor(Qt.PointingHandCursor)
         b.setToolTip(tip)
         b.setFocusPolicy(Qt.NoFocus)
         if w > 34:
-            b.setStyleSheet(f"font-size:{theme.px(10)};")
+            b.setStyleSheet(f"font-size:{theme.px(11)};")
         return b
 
     def set_meta(self, title: str | None = None, subtitle: str | None = None):
@@ -91,7 +91,7 @@ class TitleBar(QWidget):
         self._fit_text()
 
     def _fit_text(self):
-        avail = max(180, self.width() - 400)
+        avail = max(180, min(520, self.width() - 400))
         fm = self.lbl_title.fontMetrics()
         self.lbl_title.setText(fm.elidedText(self._full_title, Qt.ElideRight, avail))
         self.lbl_title.setToolTip(self._full_title)
@@ -144,13 +144,13 @@ class NavButton(QAbstractButton):
         self._hover = False
         self.setCheckable(True)
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedHeight(58)
+        self.setFixedHeight(60)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setAttribute(Qt.WA_Hover, True)
         self.setToolTip(label)
 
     def sizeHint(self) -> QSize:
-        return QSize(56, 58)
+        return QSize(60, 60)
 
     def enterEvent(self, e):
         self._hover = True
@@ -183,13 +183,13 @@ class NavButton(QAbstractButton):
         col = QColor(theme.c("accent") if checked
                      else theme.c("text") if self._hover else theme.c("sub"))
         f = QFont("Segoe UI Symbol")
-        f.setPointSizeF(12.5 * s)
+        f.setPointSizeF(13.5 * s)
         p.setFont(f)
         p.setPen(col)
         p.drawText(QRect(0, 7, r.width(), 24), Qt.AlignCenter, self._glyph)
 
         f2 = QFont("Microsoft YaHei UI")
-        f2.setPointSizeF(7.8 * s)
+        f2.setPointSizeF(8.6 * s)
         f2.setBold(checked)
         p.setFont(f2)
         p.drawText(QRect(0, 31, r.width(), 18), Qt.AlignCenter, self._label)

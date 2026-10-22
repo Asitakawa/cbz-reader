@@ -13,12 +13,13 @@ from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit,
                                QWidget)
 
 from .cbr import natkey
+from .layout import PageHeader, content_column
 from .imgutil import cover_pixmap
 from .store import BOOKCOVER_DIR, COVER_DIR, STORE
 from .tasks import ASYNC
 from . import theme
 
-TILE_W, COVER_W, COVER_H = 154, 146, 204
+TILE_W, COVER_W, COVER_H = 176, 168, 236
 
 try:
     NO_ORIENTATIONS = Qt.Orientations(0)
@@ -235,7 +236,7 @@ class BookTile(QFrame):
 
 
 class RecentCard(QFrame):
-    """继续阅读卡片（章节级）。"""
+    """继续阅读卡片（章节级）：小封面 + 书名/话名 + 进度。"""
 
     activated = Signal(str, str, str)   # path, name, cid
 
@@ -243,7 +244,7 @@ class RecentCard(QFrame):
         super().__init__(parent)
         self.setObjectName("RecentCard")
         sc = theme.current()["scale"]
-        card_w, card_h = int(212 * sc), int(44 * sc)
+        card_w, card_h = int(236 * sc), int(74 * sc)
         self.setFixedSize(card_w, card_h)
         self.setCursor(Qt.PointingHandCursor)
         self._cid = h.get("key", "")
@@ -251,33 +252,103 @@ class RecentCard(QFrame):
         self._name = h.get("name", "")
         self._title = h.get("book_title") or self._name
 
-        cl = QHBoxLayout(self)
-        cl.setContentsMargins(10, 4, 8, 4)
-        cl.setSpacing(8)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(int(10 * sc), int(8 * sc), int(12 * sc), int(8 * sc))
+        lay.setSpacing(int(10 * sc))
+
+        self.thumb = QLabel()
+        self.thumb.setObjectName("CoverBox")
+        self.thumb.setFixedSize(int(38 * sc), int(52 * sc))
+        self.thumb.setAlignment(Qt.AlignCenter)
+        lay.addWidget(self.thumb)
+
         v = QVBoxLayout()
         v.setContentsMargins(0, 0, 0, 0)
-        v.setSpacing(0)
+        v.setSpacing(int(3 * sc))
         nm = QLabel()
         nm.setObjectName("RecentName")
-        nm.setText(QFontMetrics(nm.font()).elidedText(self._title, Qt.ElideMiddle,
-                                                      card_w - 46))
+        text_w = card_w - int(86 * sc)
+        nm.setText(QFontMetrics(nm.font()).elidedText(self._title, Qt.ElideMiddle, text_w))
         total = h.get("total", 0) or 0
         pg = (h.get("page", 0) or 0) + 1
         sub = QLabel(f"{self._name} · {pg}/{total}" if total else self._name)
         sub.setObjectName("RecentSub")
+        sub.setText(QFontMetrics(sub.font()).elidedText(sub.text(), Qt.ElideMiddle, text_w))
         v.addWidget(nm)
         v.addWidget(sub)
-        bar = QFrame()
-        bar.setFixedWidth(4)
-        theme.now(bar, "background:$accent;border-radius:2px;")
-        cl.insertWidget(0, bar)
-        cl.addLayout(v, 1)
+
+        track = QFrame()
+        track.setFixedHeight(int(4 * sc))
+        track.setFixedWidth(text_w)
+        theme.style(track, "background:$border;border-radius:2px;")
+        ratio = 0.0 if not total else min(1.0, pg / total)
+        if ratio:
+            fill = QFrame(track)
+            fill.setGeometry(0, 0, int(text_w * ratio), int(4 * sc))
+            theme.now(fill, "background:$accent;border-radius:2px;")
+        v.addWidget(track)
+        lay.addLayout(v, 1)
+
         self.setToolTip(f"{self._title} · {self._name}\n{self._path}")
+        self._load_thumb()
+
+    def _load_thumb(self):
+        c = COVER_DIR / f"{self._cid}_420.jpg"
+        if c.exists():
+            pm = QPixmap(str(c))
+            if not pm.isNull():
+                sc = theme.current()["scale"]
+                self.thumb.setPixmap(cover_pixmap(pm, int(38 * sc), int(52 * sc),
+                                                  max(3, theme.radius_px() - 3),
+                                                  self.devicePixelRatioF()))
+                return
+        self.thumb.setText("阅")
 
     def mouseReleaseEvent(self, e):
         if e.button() == Qt.LeftButton:
             self.activated.emit(self._path, self._name, self._cid)
         super().mouseReleaseEvent(e)
+
+
+class AddTile(QFrame):
+    """封面墙末尾的「新增 / 导入」占位卡，避免书架显得空荡。"""
+
+    clicked = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(TILE_W, COVER_H + 64)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("新增一本书，或把 .cbz / 图片文件夹拖进来")
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mouseReleaseEvent(e)
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        pen = QPen(QColor(theme.c("border2")))
+        pen.setStyle(Qt.DashLine)
+        pen.setWidth(1)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        r = self.rect().adjusted(1, 1, -1, -1)
+        p.drawRoundedRect(r, theme.radius_px() + 2, theme.radius_px() + 2)
+
+        f = QFont("Microsoft YaHei UI")
+        f.setPointSizeF(26 * theme.current()["scale"])
+        p.setFont(f)
+        p.setPen(QColor(theme.c("accent")))
+        p.drawText(QRect(0, 0, self.width(), COVER_H - 20), Qt.AlignCenter, "＋")
+
+        f2 = QFont("Microsoft YaHei UI")
+        f2.setPointSizeF(9.5 * theme.current()["scale"])
+        p.setFont(f2)
+        p.setPen(QColor(theme.c("sub")))
+        p.drawText(QRect(0, COVER_H - 44, self.width(), 22), Qt.AlignCenter, "新增书 / 导入")
+        p.end()
 
 
 class ShelfPage(QWidget):
@@ -298,26 +369,22 @@ class ShelfPage(QWidget):
         self._keyword = ""
         self._sort = "added"
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(18, 12, 18, 12)
-        root.setSpacing(10)
+        root = content_column(self, spacing=18)
 
-        head = QHBoxLayout()
-        head.setSpacing(8)
-        self.lbl_count = QLabel("")
-        self.lbl_count.setObjectName("SectionTitle")
-        head.addWidget(self.lbl_count)
-        head.addStretch(1)
+        self.header = PageHeader("书架", "")
+        self.header.actions.addStretch(1)
 
         self.search = QLineEdit()
         self.search.setObjectName("SearchBox")
         self.search.setPlaceholderText("搜索书名…")
-        self.search.setFixedWidth(180)
+        self.search.setFixedWidth(230)
+        self.search.setFixedHeight(36)
         self.search.textChanged.connect(self._on_search)
-        head.addWidget(self.search)
+        self.header.actions.addWidget(self.search)
 
         self.btn_sort = QPushButton("添加时间")
         self.btn_sort.setObjectName("Ghost")
+        self.btn_sort.setFixedHeight(36)
         self.btn_sort.setCursor(Qt.PointingHandCursor)
         menu = QMenu(self.btn_sort)
         for label, val in (("添加时间", "added"), ("书名", "name"),
@@ -326,50 +393,59 @@ class ShelfPage(QWidget):
             a.triggered.connect(lambda _=False, v=val, t=label: self._set_sort(v, t))
             menu.addAction(a)
         self.btn_sort.setMenu(menu)
-        head.addWidget(self.btn_sort)
+        self.header.actions.addWidget(self.btn_sort)
 
         self.btn_new = QPushButton("＋ 新增书")
         self.btn_new.setObjectName("Primary")
+        self.btn_new.setFixedHeight(36)
         self.btn_new.setCursor(Qt.PointingHandCursor)
         self.btn_new.setToolTip("新建一本书，然后往里面导入各话")
         self.btn_new.clicked.connect(self.new_book_requested)
-        head.addWidget(self.btn_new)
-        root.addLayout(head)
+        self.header.actions.addWidget(self.btn_new)
+        root.addWidget(self.header)
 
-        # ---- 继续阅读（章节级）----
+        # ---- 继续阅读（章节级，自动换行，不做横向滚动）----
         self.recent_box = QFrame()
         self.recent_box.setObjectName("Card")
         rb = QVBoxLayout(self.recent_box)
-        rb.setContentsMargins(12, 8, 12, 10)
-        rb.setSpacing(6)
+        rb.setContentsMargins(16, 14, 16, 16)
+        rb.setSpacing(12)
         rhead = QHBoxLayout()
         t = QLabel("继续阅读")
-        t.setObjectName("CardTitle")
+        t.setObjectName("SectionTitle")
         rhead.addWidget(t)
         rhead.addStretch(1)
         self.lbl_recent_hint = QLabel("")
         self.lbl_recent_hint.setObjectName("Muted")
         rhead.addWidget(self.lbl_recent_hint)
         rb.addLayout(rhead)
-        self.recent_scroll = QScrollArea()
-        self.recent_scroll.setWidgetResizable(True)
-        self.recent_scroll.setFixedHeight(int(56 * theme.current()["scale"]))
-        self.recent_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.recent_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.recent_inner = QWidget()
-        self.recent_lay = QHBoxLayout(self.recent_inner)
-        self.recent_lay.setContentsMargins(0, 0, 0, 0)
-        self.recent_lay.setSpacing(8)
-        self.recent_lay.addStretch(1)
-        self.recent_scroll.setWidget(self.recent_inner)
-        rb.addWidget(self.recent_scroll)
+        self.recent_host = QWidget()
+        self.recent_flow = FlowLayout(self.recent_host, margin=0, spacing=12)
+        sp = self.recent_host.sizePolicy()
+        sp.setHeightForWidth(True)
+        self.recent_host.setSizePolicy(sp)
+        rb.addWidget(self.recent_host)
         root.addWidget(self.recent_box)
 
         # ---- 书封面墙 ----
+        self.grid_head = QWidget()
+        gh = QHBoxLayout(self.grid_head)
+        gh.setContentsMargins(0, 0, 0, 0)
+        gh.setSpacing(10)
+        gt = QLabel("全部书籍")
+        gt.setObjectName("SectionTitle")
+        gh.addWidget(gt)
+        gh.addStretch(1)
+        self.lbl_sort_hint = QLabel("按添加时间")
+        self.lbl_sort_hint.setObjectName("Muted")
+        gh.addWidget(self.lbl_sort_hint)
+        root.addWidget(self.grid_head)
+
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
         self.grid_host = QWidget()
-        self.flow = FlowLayout(self.grid_host, margin=2, spacing=14)
+        self.flow = FlowLayout(self.grid_host, margin=0, spacing=20)
         self.scroll.setWidget(self.grid_host)
         root.addWidget(self.scroll, 1)
 
@@ -384,8 +460,7 @@ class ShelfPage(QWidget):
         self.refresh()
 
     def _on_theme_changed(self):
-        # 字号会影响最近阅读卡高度与书名省略宽度，重建一次即可
-        self.recent_scroll.setFixedHeight(int(56 * theme.current()["scale"]))
+        # 字号会影响卡片尺寸与书名省略宽度，重建一次即可
         self.refresh()
 
     # ================= 渲染 =================
@@ -425,30 +500,35 @@ class ShelfPage(QWidget):
             self.flow.addWidget(tile)
             self._tiles[b["id"]] = tile
 
+        add = AddTile()
+        add.clicked.connect(self.new_book_requested)
+        self.flow.addWidget(add)
+
         all_books = STORE.book_list()
         total_ch = sum(b["stats"]["chapters"] for b in all_books)
-        self.lbl_count.setText(
-            f"我的书架 · {len(all_books)} 本书 / {total_ch} 话"
-            + (f"（{len(books)} 本匹配）" if self._keyword else ""))
+        self.header.set_subtitle(
+            f"{len(all_books)} 本书 · {total_ch} 话"
+            + (f" · 匹配 {len(books)} 本" if self._keyword else ""))
         self.empty.setVisible(not all_books)
+        self.grid_head.setVisible(bool(all_books))
         self.scroll.setVisible(bool(all_books))
 
     def _rebuild_recent(self):
-        while self.recent_lay.count() > 1:
-            it = self.recent_lay.takeAt(0)
+        while self.recent_flow.count():
+            it = self.recent_flow.takeAt(0)
             w = it.widget()
             if w:
                 w.setParent(None)
                 w.deleteLater()
-        items = STORE.recent_chapters(12)
+        items = STORE.recent_chapters(4)
         for h in items:
             card = RecentCard(h)
             card.activated.connect(self.open_chapter)
-            self.recent_lay.insertWidget(self.recent_lay.count() - 1, card)
+            self.recent_flow.addWidget(card)
         self.recent_box.setVisible(bool(items))
         if items:
             n = len(STORE.recent_chapters(999))
-            self.lbl_recent_hint.setText(f"最近读过 {n} 话")
+            self.lbl_recent_hint.setText(f"最近读过 {n} 话 · 点卡片直接续读")
 
     def _on_cover(self, cid: str, cover_path: str):
         for tile in self._tiles.values():
@@ -461,6 +541,7 @@ class ShelfPage(QWidget):
     def _set_sort(self, val: str, label: str):
         self._sort = val
         self.btn_sort.setText(label)
+        self.lbl_sort_hint.setText(f"按{label}排序")
         self._rebuild_grid()
 
     # ================= 右键菜单 =================

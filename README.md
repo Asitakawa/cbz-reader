@@ -61,6 +61,13 @@ Windows 11 桌面漫画阅读器 —— **两层书架（书 → 话）**、阅�
 
 设置写在 `books.json` 里，按书记忆；导入新话后仍按当前模式显示，小窗的「下一话」也跟着这个顺序走。
 
+## 排版与图标
+
+- 内容区不再铺满整窗：最大 **1280px 版心居中**，宽屏不散、窄屏自动收窄
+- 正文 13px、说明 12px、页面标题 24px，设置页改为「标签列 + 控件列」的栅格对齐
+- 书架：继续阅读卡片按宽度自动换行，末尾固定一个「新增书 / 导入」占位卡
+- 全部界面图标改为几何字形，**不使用彩色 emoji**
+
 ## 主题与护眼
 
 界面按「低刺激纸感」重做：背景不用纯白纯黑，正文与背景的对比够用但不刺眼，强调色只出现在当前态与关键动作上。
@@ -89,8 +96,8 @@ Windows 下双击 `启动阅读器.bat`（无控制台窗口），排错时用 `
 
 **方式二：安装包**
 
-下载 `CBZReader_Setup_2.3.0.exe`，双击安装（安装到 `%LOCALAPPDATA%\CBZReader`，无需管理员权限），自动创建桌面与开始菜单快捷方式，可在「设置 → 应用」中卸载。
-便携版 `CBZReader_2.3.0_portable.zip` 解压即用。
+下载 `CBZReader_Setup_2.4.0.exe`，双击安装（安装到 `%LOCALAPPDATA%\CBZReader`，无需管理员权限），自动创建桌面与开始菜单快捷方式，可在「设置 → 应用」中卸载。
+便携版 `CBZReader_2.4.0_portable.zip` 解压即用。
 
 ## 快捷键
 
@@ -183,8 +190,8 @@ python packaging/build.py      # 图标 → PyInstaller → 冻结自检 → 便
 | 文件 | 说明 |
 |---|---|
 | `dist/CBZReader/` | 绿色版程序目录（约 123 MB，含 Qt 运行时） |
-| `dist/CBZReader_2.3.0_portable.zip` | 便携版压缩包（约 62 MB） |
-| `dist/CBZReader_Setup_2.3.0.exe` | 单文件安装包（自带负载，双击即装，无需管理员） |
+| `dist/CBZReader_2.4.0_portable.zip` | 便携版压缩包（约 62 MB） |
+| `dist/CBZReader_Setup_2.4.0.exe` | 单文件安装包（自带负载，双击即装，无需管理员） |
 
 打包流程内置 `CBZReader.exe --selftest` 自检：验证 Pillow/WebP 解码、目录可写、书库读取与封面生成，自检不通过则打包失败。
 

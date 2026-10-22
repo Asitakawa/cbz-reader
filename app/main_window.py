@@ -27,7 +27,7 @@ from .tasks import ASYNC
 from . import theme
 from .window import FramelessWindow, MARGIN, NavButton, Toggle
 
-NAV = [("▤", "书架"), ("◔", "历史"), ("◑", "个性化"), ("⚙", "设置")]
+NAV = [("▤", "书架"), ("◔", "历史"), ("◑", "个性化"), ("◎", "设置")]
 DEMO_DIR = r"C:\Users\Arelq_\Desktop\各种bat脚本\manga_speace_ccb\O1"
 
 
@@ -74,9 +74,9 @@ class MainWindow(FramelessWindow):
 
         self.rail = QFrame()
         self.rail.setObjectName("NavRail")
-        self.rail.setFixedWidth(70)
+        self.rail.setFixedWidth(76)
         rl = QVBoxLayout(self.rail)
-        rl.setContentsMargins(7, 12, 7, 10)
+        rl.setContentsMargins(8, 14, 8, 12)
         rl.setSpacing(6)
         self.nav_btns: list[NavButton] = []
         for i, (icon, name) in enumerate(NAV):
@@ -235,7 +235,7 @@ class MainWindow(FramelessWindow):
             subtitle = sub or "本地漫画书库"
         else:
             title = "CBZ 阅读器 · 本地漫画书库"
-            subtitle = "书 → 话 → 阅读"
+            subtitle = "本地漫画书库"
         self.title_bar.set_meta(title, subtitle)
         self.setWindowTitle(title)
 

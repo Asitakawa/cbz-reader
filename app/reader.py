@@ -454,7 +454,7 @@ class ReaderPage(QWidget):
         self.lbl_page.setFixedWidth(70)
         self.lbl_page.setAlignment(Qt.AlignCenter)
         self.btn_camo = QPushButton("伪装")
-        self.btn_fs = QPushButton("⛶")
+        self.btn_fs = QPushButton("全屏")
         self.btn_fs.setToolTip("全屏 (F11)")
 
         self.btn_pin = QPushButton("固定")
@@ -649,7 +649,7 @@ class ReaderPage(QWidget):
         self.badge.move(self.width() - self.badge.width() - 18, 14)
 
     def set_fullscreen(self, on: bool):
-        self.btn_fs.setText("⤡" if on else "⛶")
+        self.btn_fs.setText("还原" if on else "全屏")
 
     def keyPressEvent(self, e):
         k = e.key()

@@ -186,7 +186,7 @@ def _resolve() -> None:
     tok["r4"] = f"{r + 8}px"
 
     s = _STATE["scale"]
-    for n in range(9, 23):
+    for n in range(9, 27):
         tok[f"f{n}"] = f"{max(9, round(n * s))}px"
     TOK.clear()
     TOK.update(tok)
@@ -309,7 +309,7 @@ def build_qss() -> str:
 #Root { background: $bg; border: 1px solid $border; border-radius: $r3; }
 #Content { background: transparent; }
 #TitleBar { background: transparent; }
-#AppTitle { color: $text; font-size: $f13; font-weight: 600; }
+#AppTitle { color: $text; font-size: $f14; font-weight: 600; }
 #AppSub { color: $sub; font-size: $f11; }
 #TitleBtn {
     background: transparent; border: none; border-radius: $r1;
@@ -332,14 +332,15 @@ def build_qss() -> str:
 #RailFoot { color: $sub; font-size: $f9; }
 
 #Page { background: $bg; }
-#SectionTitle { color: $text; font-size: $f15; font-weight: 700; }
-#CardTitle { color: $text; font-size: $f12; font-weight: 700; }
-#GroupTitle { color: $text; font-size: $f13; font-weight: 700; }
-#FormLabel { color: $text; font-size: $f12; }
-#BookTitle { color: $text; font-size: $f19; font-weight: 700; }
+#PageTitle { color: $text; font-size: $f24; font-weight: 700; }
+#SectionTitle { color: $text; font-size: $f14; font-weight: 700; }
+#CardTitle { color: $text; font-size: $f13; font-weight: 700; }
+#GroupTitle { color: $text; font-size: $f14; font-weight: 700; }
+#FormLabel { color: $text; font-size: $f13; }
+#BookTitle { color: $text; font-size: $f20; font-weight: 700; }
 #ReaderTitle { color: $overlay_text; font-size: $f12; font-weight: 600; }
-#PageSub { color: $sub; font-size: $f11; }
-#Muted { color: $sub; font-size: $f11; }
+#PageSub { color: $sub; font-size: $f12; }
+#Muted { color: $sub; font-size: $f12; }
 #EmptyState { color: $sub; font-size: $f13; }
 #Divider { background: $border; }
 
@@ -347,44 +348,44 @@ QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; border: 
 
 #SearchBox {
     background: $surface; border: 1px solid $border; border-radius: $r2;
-    padding: 6px 10px; color: $text; font-size: $f12;
+    padding: 7px 12px; color: $text; font-size: $f13;
 }
 #SearchBox:focus { border: 1px solid $accent; background: $surface; }
 
 QPushButton#Primary {
     background: $accent; color: $accent_text; border: none; border-radius: $r2;
-    padding: 7px 16px; font-size: $f12; font-weight: 600;
+    padding: 7px 16px; font-size: $f13; font-weight: 600;
 }
 QPushButton#Primary:hover { background: $accent_h; }
 QPushButton#Primary:disabled { background: $border; color: $sub; }
 
 QPushButton#Ghost {
     background: $surface; color: $text; border: 1px solid $border;
-    border-radius: $r2; padding: 7px 13px; font-size: $f12;
+    border-radius: $r2; padding: 7px 14px; font-size: $f13;
 }
 QPushButton#Ghost:hover { background: $surface2; border-color: $border2; }
 QPushButton#Ghost:pressed { background: $surface3; }
 
 QPushButton#Danger {
     background: transparent; color: $danger; border: 1px solid $danger;
-    border-radius: $r2; padding: 7px 13px; font-size: $f12;
+    border-radius: $r2; padding: 7px 14px; font-size: $f13;
 }
 QPushButton#Danger:hover { background: $danger_soft; }
 
 #Card { background: $surface; border: 1px solid $border; border-radius: $r3; }
 #CardFlat { background: $surface2; border: 1px solid $border; border-radius: $r2; }
-#StatNum { color: $text; font-size: $f20; font-weight: 700; }
-#StatLbl { color: $sub; font-size: $f11; }
+#StatNum { color: $text; font-size: $f24; font-weight: 700; }
+#StatLbl { color: $sub; font-size: $f12; }
 
 #BookTile { background: transparent; border: none; }
-#TileMeta { color: $text; font-size: $f11; font-weight: 600; }
+#TileMeta { color: $text; font-size: $f12; font-weight: 600; }
 #CoverBox { background: $surface2; border: 1px solid $border; border-radius: $r2;
-            color: $sub; font-size: $f11; }
+            color: $sub; font-size: $f12; }
 
 #RecentCard { background: $surface2; border: 1px solid transparent; border-radius: $r2; }
 #RecentCard:hover { border-color: $accent; background: $accent_soft; }
-#RecentName { color: $text; font-size: $f12; font-weight: 600; }
-#RecentSub { color: $sub; font-size: $f10; }
+#RecentName { color: $text; font-size: $f13; font-weight: 600; }
+#RecentSub { color: $sub; font-size: $f11; }
 
 QListWidget { background: $surface; border: 1px solid $border; border-radius: $r3; outline: none; }
 QListWidget::item { padding: 9px 12px; border: none; color: $text; }
@@ -393,7 +394,7 @@ QListWidget::item:hover { background: $surface2; }
 
 QComboBox, QLineEdit, QSpinBox {
     background: $surface; border: 1px solid $border; border-radius: $r2;
-    padding: 5px 8px; color: $text; font-size: $f12; min-height: 18px;
+    padding: 6px 10px; color: $text; font-size: $f13; min-height: 20px;
     selection-background-color: $accent; selection-color: $accent_text;
 }
 QComboBox:focus, QLineEdit:focus { border-color: $accent; }
@@ -404,7 +405,7 @@ QComboBox QAbstractItemView {
     selection-color: $text; color: $text; outline: none;
 }
 
-QCheckBox { color: $text; font-size: $f12; spacing: 8px; }
+QCheckBox { color: $text; font-size: $f13; spacing: 8px; }
 QCheckBox::indicator { width: 0px; height: 0px; border: none; background: transparent; }
 
 QSlider::groove:horizontal { height: 4px; background: $border; border-radius: 2px; }

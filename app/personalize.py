@@ -8,8 +8,9 @@ from PySide6.QtWidgets import (QButtonGroup, QFrame, QGridLayout, QHBoxLayout,
                                QWidget)
 
 from . import theme
+from .layout import PageHeader, content_column
 
-CARD_W, CARD_H = 240, 178
+CARD_W, CARD_H = 280, 184
 
 
 class ThemeCard(QFrame):
@@ -53,7 +54,7 @@ class ThemeCard(QFrame):
         p.drawRoundedRect(outer, 12, 12)
 
         # ---- 迷你窗口 ----
-        win = QRect(14, 14, CARD_W - 28, 112)
+        win = QRect(14, 14, CARD_W - 28, CARD_H - 80)
         p.setPen(QPen(QColor(m["border"]), 1))
         p.setBrush(QColor(m["surface"]))
         p.drawRoundedRect(win, 8, 8)
@@ -98,12 +99,12 @@ class ThemeCard(QFrame):
         f.setBold(True)
         p.setFont(f)
         p.setPen(QColor(m["text"]))
-        p.drawText(QRect(16, 132, CARD_W - 32, 18), Qt.AlignLeft | Qt.AlignVCenter, m["name"])
+        p.drawText(QRect(16, CARD_H - 64, CARD_W - 32, 18), Qt.AlignLeft | Qt.AlignVCenter, m["name"])
 
         f2 = QFont("Microsoft YaHei UI", 8)
         p.setFont(f2)
         p.setPen(QColor(m["sub"]))
-        p.drawText(QRect(16, 151, CARD_W - 32, 16), Qt.AlignLeft | Qt.AlignVCenter, m["tag"])
+        p.drawText(QRect(16, CARD_H - 45, CARD_W - 32, 16), Qt.AlignLeft | Qt.AlignVCenter, m["tag"])
 
         # 选中角标
         if self._active:
@@ -170,28 +171,16 @@ class PersonalizePage(QWidget):
         self._dots: dict[str, ColorDot] = {}
         self._seg_buttons: dict[str, list[QPushButton]] = {}
 
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(18, 12, 18, 12)
-        outer.setSpacing(10)
-
-        head = QHBoxLayout()
-        box = QVBoxLayout()
-        box.setContentsMargins(0, 0, 0, 0)
-        box.setSpacing(1)
-        t = QLabel("个性化")
-        t.setObjectName("SectionTitle")
-        self.lbl_sub = QLabel("")
-        self.lbl_sub.setObjectName("PageSub")
-        box.addWidget(t)
-        box.addWidget(self.lbl_sub)
-        head.addLayout(box)
-        head.addStretch(1)
+        outer = content_column(self, spacing=18)
+        self.header = PageHeader("个性化", "")
+        self.lbl_sub = self.header.lbl_sub
         self.btn_reset = QPushButton("恢复默认外观")
         self.btn_reset.setObjectName("Ghost")
+        self.btn_reset.setFixedHeight(34)
         self.btn_reset.setCursor(Qt.PointingHandCursor)
         self.btn_reset.clicked.connect(self._reset)
-        head.addWidget(self.btn_reset)
-        outer.addLayout(head)
+        self.header.actions.addWidget(self.btn_reset)
+        outer.addWidget(self.header)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -205,9 +194,9 @@ class PersonalizePage(QWidget):
         # ---- 主题画廊 ----
         g, body = self._group(lay, "主题", "换一套纸色与墨色，长时间阅读更舒服")
         grid = QGridLayout()
-        grid.setHorizontalSpacing(12)
-        grid.setVerticalSpacing(12)
-        grid.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(14)
+        grid.setAlignment(Qt.AlignCenter | Qt.AlignTop)
         for i, tid in enumerate(theme.THEMES):
             card = ThemeCard(tid)
             card.picked.connect(self._pick_theme)
@@ -344,6 +333,6 @@ class PersonalizePage(QWidget):
         acc_name = theme.ACCENTS[cur["accent"]]["name"]
         accent_hex = (theme.ACCENTS[cur["accent"]]["hex"] or theme.meta()["accent"]).upper()
         self.lbl_accent.setText(f"{acc_name} {accent_hex}")
-        self.lbl_sub.setText(
+        self.header.set_subtitle(
             f"当前：{theme.meta()['name']} · {acc_name} · {theme.RADII[cur['radius']]}圆角"
             f" · {theme.SCALES[cur['scale']]}字号")
