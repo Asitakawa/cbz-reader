@@ -7,6 +7,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import re
 import threading
 import zipfile
@@ -43,13 +44,34 @@ def is_zip_comic(path) -> bool:
 is_cbz = is_zip_comic
 
 
-def has_images(d: Path) -> bool:
-    """文件夹里（含一级子目录）是否存在图片。"""
+def _iter_images(root: Path):
+    """遍历目录下所有图片（递归、跳过隐藏文件/目录与 __MACOSX、不跟随符号链接）。"""
+    root = Path(root)
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dirnames[:] = [d for d in dirnames
+                       if not d.startswith(".") and d != "__MACOSX"]
+        for name in filenames:
+            if name.startswith("."):
+                continue
+            f = Path(dirpath) / name
+            if f.suffix.lower() in IMG_EXT:
+                yield f
+
+
+def has_images(d: Path, deep: bool = False) -> bool:
+    """文件夹里是否有图片。
+
+    deep=False 只看直属文件（用于判断「这个目录本身是不是一话」）；
+    deep=True 连同子目录一起看（用于判断「这棵树里有没有图」）。
+    """
     if not d.is_dir():
         return False
     try:
+        if deep:
+            return next(_iter_images(d), None) is not None
         for f in d.iterdir():
-            if f.is_file() and f.suffix.lower() in IMG_EXT:
+            if f.is_file() and not f.name.startswith(".") \
+                    and f.suffix.lower() in IMG_EXT:
                 return True
     except Exception:
         return False
@@ -105,10 +127,8 @@ class ComicSource:
         names: list[str] = []
         try:
             if self.is_dir:
-                for f in self.path.iterdir():
-                    if f.is_file() and not f.name.startswith(".") \
-                            and f.suffix.lower() in IMG_EXT:
-                        names.append(f.name)
+                for f in _iter_images(self.path):
+                    names.append(f.relative_to(self.path).as_posix())
             else:
                 for n in self.zip.namelist():
                     if n.endswith("/") or "__MACOSX" in n:
@@ -147,9 +167,8 @@ class ComicSource:
         try:
             if self.is_dir:
                 ts = [self.path.stat().st_mtime]
-                for f in self.path.iterdir():
-                    if f.is_file() and f.suffix.lower() in IMG_EXT:
-                        ts.append(f.stat().st_mtime)
+                for f in _iter_images(self.path):
+                    ts.append(f.stat().st_mtime)
                 return max(ts) if ts else 0.0
             return self.path.stat().st_mtime
         except Exception:
@@ -277,7 +296,7 @@ def scan_chapters(source) -> list[dict]:
         if child.name.startswith("."):
             continue
         if child.is_dir():
-            if has_images(child):
+            if has_images(child) or has_images(child, deep=True):
                 add(child, "dir", child.name)
             else:
                 for f in sorted(child.rglob("*"), key=lambda x: natkey(str(x))):
@@ -294,5 +313,5 @@ def has_any_comic(path) -> bool:
     if p.is_file():
         return is_zip_comic(p)
     if p.is_dir():
-        return has_images(p) or bool(scan_chapters(p))
+        return has_images(p) or has_images(p, deep=True) or bool(scan_chapters(p))
     return False

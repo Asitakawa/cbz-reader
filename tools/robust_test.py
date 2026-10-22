@@ -158,13 +158,30 @@ def test_formats():
     make_img(scan_root / "第2话" / "01.jpg")
     make_cbz(scan_root / "第3话" / "第3话.cbz", {"01.jpg": img_bytes(a)})
     make_img(scan_root / "第4话" / "pages" / "01.jpg")     # 图片在二级子目录
+    make_img(scan_root / "第4话" / "pages" / "02.jpg")
+    make_img(scan_root / "第5话" / "上" / "01.jpg")         # 同一话拆在多个子目录
+    make_img(scan_root / "第5话" / "下" / "01.jpg")
+    make_img(scan_root / "第6话" / "01.jpg")                # 直属 + 子目录混排
+    make_img(scan_root / "第6话" / "彩页" / "01.jpg")
     got = scan_chapters(scan_root)
     got_names = [c["name"] for c in got]
-    check("导入扫描：图片文件夹与子目录中的压缩包都识别",
-          {"第1话", "第2话", "第3话"} <= set(got_names), " / ".join(got_names))
-    if "第4话" not in got_names:
-        note("图片放在二级子目录的文件夹（第4话/pages/01.jpg）在导入时被跳过——"
-             "has_images 只查直属文件，rglob 只找压缩包")
+    check("导入扫描：图片文件夹、子目录压缩包、二级子目录图片都识别",
+          {"第1话", "第2话", "第3话", "第4话", "第5话", "第6话"} <= set(got_names),
+          " / ".join(got_names))
+
+    src4 = ComicSource(scan_root / "第4话")
+    check("目录型一话：递归读到二级子目录的图片",
+          src4.page_count == 2 and src4.names == ["pages/01.jpg", "pages/02.jpg"],
+          f"{src4.page_count} 页 → {src4.names}")
+    src5 = ComicSource(scan_root / "第5话")
+    check("目录型一话：多个子目录按名称自然排序合并",
+          src5.page_count == 2 and src5.names == ["上/01.jpg", "下/01.jpg"],
+          " → ".join(src5.names))
+    src6 = ComicSource(scan_root / "第6话")
+    check("目录型一话：直属图片在前、子目录图片在后",
+          src6.page_count == 2 and src6.names == ["01.jpg", "彩页/01.jpg"],
+          " → ".join(src6.names))
+    src4.close(); src5.close(); src6.close()
 
     single = scan_chapters(good)
     check("导入扫描：单个压缩包 = 一话", len(single) == 1 and single[0]["kind"] == "file",
